@@ -1,4 +1,10 @@
 <?php
+if (!function_exists('has_permission')) {
+    require_once __DIR__ . '/includes/security.php';
+}
+if (isset($conn)) {
+    require_admin_login($conn);
+}
 $current_page = basename($_SERVER['PHP_SELF']);
 
 if (!isset($global_settings)) {

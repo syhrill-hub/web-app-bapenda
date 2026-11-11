@@ -3,11 +3,8 @@ session_start();
 require_once '../config.php';
 require_once 'includes/security.php';
 
-// Cek autentikasi
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: login.php");
-    exit;
-}
+// Cek autentikasi & sinkronisasi status/role user
+require_admin_login($conn);
 
 // Handle Reset Logs
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_logs') {
