@@ -540,7 +540,7 @@ $thm_primary_glow = $thm_primary . '4D'; // 30% opacity in hex
                 <h1><?php echo $page_title ?? 'Dashboard'; ?></h1>
             </div>
             <div class="topbar-right">
-                <span style="color: var(--text-muted); font-size: 14px; font-weight: 500;">Halo, Admin</span>
+                <span style="color: var(--text-muted); font-size: 14px; font-weight: 500;">Halo, <?php echo htmlspecialchars($_SESSION['full_name'] ?? $_SESSION['username'] ?? 'Admin'); ?></span>
                 <a href="../" target="_blank" class="btn-view-site">
                     <i class="fas fa-external-link-alt" style="margin-right:5px;"></i> Lihat Website
                 </a>

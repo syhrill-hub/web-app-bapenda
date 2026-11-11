@@ -1,5 +1,12 @@
 <?php
+session_start();
 require_once '../config.php';
+
+if (!isset($_SESSION['admin_id']) || (int)($_SESSION['admin_role_id'] ?? 0) !== 1) {
+    http_response_code(403);
+    header("Location: login.php");
+    exit;
+}
 
 // Reset admin lockout
 $conn->query("UPDATE users SET failed_attempts = 0, last_failed_at = NULL WHERE username = 'admin'");
