@@ -2,6 +2,7 @@
 session_start();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once '../includes/sinpelaja.php';
 
 if (!isset($_SESSION['admin_id'])) { header("Location: login.php"); exit; }
 require_permission('menu_tax_target');
@@ -63,6 +64,8 @@ require_once 'layout_header.php';
     <?php echo htmlspecialchars($flash_msg); ?>
 </div>
 <?php endif; ?>
+
+<?php echo sinpelaja_admin_status_banner(); ?>
 
 <div class="card">
     <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">

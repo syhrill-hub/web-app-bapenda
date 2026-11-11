@@ -24,6 +24,36 @@ $months_array = [
 $bulan_text = ($selected_bulan !== 'all' && isset($months_array[(int) $selected_bulan])) ? ' s/d ' . $months_array[(int) $selected_bulan] : '';
 
 // Get available years dynamically from DB (all years with any data)
+require_once __DIR__ . '/includes/sinpelaja.php';
+$data_source = 'local';
+$sinpelaja_fetched_at = null;
+$sinpelaja_bundle = null;
+
+$sinpelaja_pdo = sinpelaja_get_pdo();
+if ($sinpelaja_pdo instanceof PDO) {
+    try {
+        $sinpelaja_bundle = sinpelaja_fetch_dashboard_bundle($sinpelaja_pdo, $selected_year, $selected_bulan);
+    } catch (Throwable $e) {
+        $sinpelaja_bundle = null;
+    }
+}
+
+if (is_array($sinpelaja_bundle)) {
+    $data_source          = 'sinpelaja';
+    $sinpelaja_fetched_at = $sinpelaja_bundle['fetched_at'] ?? null;
+    $years                = $sinpelaja_bundle['years'];
+    $selected_year        = $sinpelaja_bundle['selected_year'];
+    $jenis_list           = $sinpelaja_bundle['jenis_list'];
+    $targets              = $sinpelaja_bundle['targets'];
+    $realisasi            = $sinpelaja_bundle['realisasi'];
+    $multi_years          = $sinpelaja_bundle['multi_years'];
+    $my_labels            = $sinpelaja_bundle['my_labels'];
+    $my_targets           = $sinpelaja_bundle['my_targets'];
+    $my_real              = $sinpelaja_bundle['my_real'];
+    $my_pct               = $sinpelaja_bundle['my_pct'];
+}
+
+if ($data_source !== 'sinpelaja') {
 $years = [];
 $res_yf = $conn->query(
     "SELECT DISTINCT tahun FROM pajak_target
@@ -85,6 +115,30 @@ if ($selected_bulan !== 'all') {
 }
 
 // Compute totals
+    // Deduplikasi jenis pajak jika tabel MySQL lokal memiliki entri kode ganda
+    $dedup_jenis = [];
+    $kode_canon = [];
+    $new_targets = [];
+    $new_realisasi = [];
+    foreach ($jenis_list as $jrow) {
+        $kode = trim((string) ($jrow['kode'] ?? ''));
+        $jid = $jrow['id'];
+        if (!isset($kode_canon[$kode])) {
+            $kode_canon[$kode] = $jid;
+            $dedup_jenis[] = $jrow;
+            $new_targets[$jid] = (float) ($targets[$jid] ?? 0);
+            $new_realisasi[$jid] = (float) ($realisasi[$jid] ?? 0);
+        } else {
+            $cid = $kode_canon[$kode];
+            $new_targets[$cid] += (float) ($targets[$jid] ?? 0);
+            $new_realisasi[$cid] += (float) ($realisasi[$jid] ?? 0);
+        }
+    }
+    $jenis_list = $dedup_jenis;
+    $targets = $new_targets;
+    $realisasi = $new_realisasi;
+}
+
 $total_target = array_sum($targets);
 $total_realisasi = array_sum($realisasi);
 $pct_total = $total_target > 0 ? round($total_realisasi / $total_target * 100, 2) : 0;
@@ -111,6 +165,7 @@ function fmt_rp($n)
 
 // ── Multi-year comparison data ─────────────────────────────────────────
 // Fetch all years that have either target or realisasi data
+if ($data_source !== 'sinpelaja') {
 $multi_years = [];
 $res_y = $conn->query(
     "SELECT DISTINCT tahun FROM pajak_target
@@ -162,6 +217,7 @@ foreach ($multi_years as $yr) {
     $my_targets[] = round($tot_t / 1e9, 3); // Miliar Rp
     $my_real[] = round($tot_r / 1e9, 3);
     $my_pct[] = $pct_yr;
+}
 }
 ?>
 
@@ -546,6 +602,48 @@ foreach ($multi_years as $yr) {
         background: var(--primary, #0ea5e9);
         color: #fff;
     }
+    .source-status-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+    .source-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        font-weight: 600;
+        letter-spacing: .2px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, .05);
+    }
+    .source-pill.realtime {
+        background: #ecfdf5;
+        color: #065f46;
+        border: 1px solid #a7f3d0;
+    }
+    .source-pill.local {
+        background: #f8fafc;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+    }
+    .source-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .source-pill.realtime .source-dot {
+        background: #10b981;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, .22);
+    }
+    .source-pill.local .source-dot {
+        background: #64748b;
+    }
 </style>
 
 <!-- Hero -->
@@ -561,6 +659,19 @@ foreach ($multi_years as $yr) {
     <div class="container">
 
         <!-- Filter -->
+        <div class="source-status-row">
+            <?php if ($data_source === 'sinpelaja'): ?>
+                <span class="source-pill realtime" title="Data target dan realisasi ditarik langsung dari database SINPELAJA">
+                    <span class="source-dot"></span>
+                    Realtime SINPELAJA &bull; Diperbarui <?php echo htmlspecialchars(substr((string) ($sinpelaja_fetched_at ?? date('H:i:s')), 11, 5)); ?> WIB
+                </span>
+            <?php else: ?>
+                <span class="source-pill local" title="Menampilkan data tersimpan pada database portal website">
+                    <span class="source-dot"></span>
+                    Data Portal Lokal
+                </span>
+            <?php endif; ?>
+        </div>
         <form method="GET" action="pajak_dashboard.php">
             <div class="filter-bar">
                 <label for="tahun"><i class="fas fa-calendar-alt" style="margin-right:6px;color:#0ea5e9;"></i>Pilih

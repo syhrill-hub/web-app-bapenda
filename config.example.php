@@ -17,5 +17,19 @@ if ($conn->connect_error) {
 
 // Select database, suppress error if it doesn't exist yet (useful during setup)
 @$conn->select_db($dbname);
+
+// Konfigurasi koneksi realtime PostgreSQL SINPELAJA (read-only untuk Dashboard Pajak)
+// Ubah 'enabled' => true dan isi kredensial server SINPELAJA jika ekstensi PHP pdo_pgsql aktif.
+$sinpelaja_config = [
+    'enabled'      => false,
+    'host'         => '127.0.0.1',
+    'port'         => 5432,
+    'dbname'       => 'sinpelaja_db',
+    'user'         => 'sinpelaja_readonly',
+    'password'     => 'sinpelaja_password',
+    'sslmode'      => 'prefer',
+    'timeout'      => 6,
+    'statement_ms' => 8000,
+];
 ?>
 
