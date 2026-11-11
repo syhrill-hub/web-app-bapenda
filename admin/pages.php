@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -19,15 +20,23 @@ $conn->query("CREATE TABLE IF NOT EXISTS pages (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 )");
 
-// Handle Delete
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM pages WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    if ($stmt->execute()) {
-        $_SESSION['flash_success'] = "Halaman berhasil dihapus!";
-    } else {
-        $_SESSION['flash_error'] = "Gagal menghapus halaman.";
+// Handle Delete (CSRF POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = "Token keamanan tidak valid.";
+        header("Location: pages.php");
+        exit;
+    }
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id > 0) {
+        $stmt = $conn->prepare("DELETE FROM pages WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
+            $_SESSION['flash_success'] = "Halaman berhasil dihapus!";
+        } else {
+            $_SESSION['flash_error'] = "Gagal menghapus halaman.";
+        }
+        $stmt->close();
     }
     header("Location: pages.php");
     exit;
@@ -60,7 +69,7 @@ require_once 'layout_header.php';
 
 <?php if($message): ?>
     <div class="alert" style="background:<?php echo $msg_type === 'error' ? '#fee2e2' : '#d1fae5'; ?>; color:<?php echo $msg_type === 'error' ? '#991b1b' : '#065f46'; ?>; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $message; ?>
+        <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 
@@ -89,15 +98,20 @@ require_once 'layout_header.php';
                 <tr>
                     <td><strong><?php echo htmlspecialchars($p['title']); ?></strong></td>
                     <td>
-                        <a href="../page.php?slug=<?php echo htmlspecialchars($p['slug']); ?>" target="_blank" style="color: var(--primary); text-decoration: none;">
+                        <a href="../page.php?slug=<?php echo htmlspecialchars(rawurlencode((string)$p['slug'])); ?>" target="_blank" rel="noopener noreferrer" style="color: var(--primary); text-decoration: none;">
                             <i class="fas fa-external-link-alt" style="font-size: 12px;"></i> page.php?slug=<?php echo htmlspecialchars($p['slug']); ?>
                         </a>
-                        <button onclick="navigator.clipboard.writeText('page.php?slug=<?php echo htmlspecialchars($p['slug']); ?>'); alert('Tautan disalin!');" style="background:none; border:none; cursor:pointer; color:#64748b; margin-left:10px;" title="Salin URL"><i class="far fa-copy"></i></button>
+                        <button type="button" data-url="page.php?slug=<?php echo htmlspecialchars(rawurlencode((string)$p['slug']), ENT_QUOTES, 'UTF-8'); ?>" onclick="navigator.clipboard.writeText(this.dataset.url); alert('Tautan disalin!');" style="background:none; border:none; cursor:pointer; color:#64748b; margin-left:10px;" title="Salin URL"><i class="far fa-copy"></i></button>
                     </td>
                     <td><?php echo date('d M Y, H:i', strtotime($p['created_at'])); ?></td>
                     <td style="text-align: right;">
-                        <a href="page_form.php?id=<?php echo $p['id']; ?>" class="btn-action edit" title="Edit"><i class="fas fa-edit"></i></a>
-                        <a href="pages.php?delete=<?php echo $p['id']; ?>" class="btn-action delete" title="Hapus" onclick="return confirm('Apakah Anda yakin ingin menghapus halaman ini secara permanen?');"><i class="fas fa-trash"></i></a>
+                        <a href="page_form.php?id=<?php echo (int)$p['id']; ?>" class="btn-action edit" title="Edit"><i class="fas fa-edit"></i></a>
+                        <form method="post" action="pages.php" style="display:inline;" onsubmit="return confirm('Apakah Anda yakin ingin menghapus halaman ini secara permanen?');">
+                            <?php echo csrf_token_field(); ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?php echo (int)$p['id']; ?>">
+                            <button type="submit" class="btn-action delete" title="Hapus"><i class="fas fa-trash"></i></button>
+                        </form>
                     </td>
                 </tr>
                 <?php endforeach; ?>

@@ -12,7 +12,9 @@ mysqli_report(MYSQLI_REPORT_OFF);
 $conn = new mysqli($host, $user, $pass);
 
 if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+    error_log("Database connection failed: " . $conn->connect_error);
+    http_response_code(503);
+    die("Layanan database sedang tidak tersedia.");
 }
 
 // Select database, suppress error if it doesn't exist yet (useful during setup)

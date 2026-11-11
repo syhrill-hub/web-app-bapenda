@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/security_helpers.php';
 require_once 'tracker.php';
 
 // Fetch settings
@@ -107,9 +108,10 @@ $wakil_nama     = get_setting('wakil_nama', '', $settings);
 $wakil_jabatan  = get_setting('wakil_jabatan', 'Wakil Bupati Kotawaringin Barat', $settings);
 
 function clean_url($url) {
+    $url = bapenda_safe_url((string) $url, '#');
     if (empty($url) || $url === '#') return '#';
     // Let external links remain untouched
-    if (strpos($url, 'http') === 0) return $url;
+    if (stripos($url, 'http://') === 0 || stripos($url, 'https://') === 0 || stripos($url, 'mailto:') === 0 || stripos($url, 'tel:') === 0) return $url;
     // Special handling for index.php
     if ($url === 'index.php') return './';
     $url = str_replace('index.php#', './#', $url);
@@ -178,11 +180,32 @@ if ($res_agenda) {
 }
 
 // Theme settings
-$thm_primary = get_setting('theme_primary_color', '#0ea5e9', $settings);
-$thm_font = get_setting('theme_font_family', 'Poppins', $settings);
-$thm_radius_lg = get_setting('theme_border_radius', '24', $settings);
+$thm_primary = bapenda_safe_css_color(get_setting('theme_primary_color', '#0ea5e9', $settings), '#0ea5e9');
+$thm_font = bapenda_safe_css_font(
+    get_setting('theme_font_family', 'Poppins', $settings),
+    ['Poppins', 'Inter', 'Roboto', 'Montserrat'],
+    'Poppins'
+);
+$raw_radius = (string) get_setting('theme_border_radius', '24', $settings);
+$thm_radius_lg = in_array($raw_radius, ['4', '12', '24'], true) ? $raw_radius : '24';
 $thm_radius_md = intval($thm_radius_lg) / 2;
-$thm_primary_glow = $thm_primary . '4D';
+$thm_primary_glow = preg_match('/^#[0-9a-fA-F]{6}$/', $thm_primary) ? ($thm_primary . '4D') : 'rgba(14,165,233,0.3)';
+$alert_color = bapenda_safe_css_color($alert_color, '#f59e0b');
+$hero_cta1_link = clean_url($hero_cta1_link);
+$hero_cta2_link = clean_url($hero_cta2_link);
+$about_cta1_link = clean_url($about_cta1_link);
+$about_cta2_link = clean_url($about_cta2_link);
+$cta_btn1_link = clean_url($cta_btn1_link);
+$footer_social_twitter = bapenda_safe_url($footer_social_twitter, '#');
+$footer_social_facebook = bapenda_safe_url($footer_social_facebook, '#');
+$footer_social_youtube = bapenda_safe_url($footer_social_youtube, '#');
+$footer_social_instagram = bapenda_safe_url($footer_social_instagram, '#');
+$logo_image = bapenda_safe_url($logo_image, 'assets/img/logo.png');
+$about_image = bapenda_safe_url($about_image, 'assets/img/about.jpg');
+$about_cta1_icon = bapenda_safe_url($about_cta1_icon, '');
+$about_cta2_icon = bapenda_safe_url($about_cta2_icon, '');
+$cta_btn1_icon = bapenda_safe_url($cta_btn1_icon, '');
+$cta_btn2_icon = bapenda_safe_url($cta_btn2_icon, '');
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -201,7 +224,7 @@ $thm_primary_glow = $thm_primary . '4D';
     <meta name="mobile-web-app-capable" content="yes">
     <title><?php echo isset($page_title) ? htmlspecialchars($page_title) . ' - Bapenda Kobar' : 'Bapenda Kotawaringin Barat'; ?></title>
     <meta name="description" content="Portal Layanan Badan Pendapatan Daerah Kabupaten Kotawaringin Barat">
-    <?php $site_favicon = get_setting('favicon_image', '', $settings); if (!empty($site_favicon)): ?>
+    <?php $site_favicon = bapenda_safe_url(get_setting('favicon_image', '', $settings), ''); if (!empty($site_favicon)): ?>
     <link rel="icon" href="<?php echo htmlspecialchars($site_favicon); ?>">
     <?php endif; ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -298,7 +321,7 @@ $thm_primary_glow = $thm_primary . '4D';
                                     <?php elseif(strtolower($m['text']) == 'layanan'): ?>
                                     <div class="nav-dropdown">
                                         <?php foreach($services as $s): ?>
-                                        <a href="<?php echo htmlspecialchars($s['url']); ?>" target="_blank"><?php echo htmlspecialchars($s['title']); ?></a>
+                                        <a href="<?php echo htmlspecialchars(bapenda_safe_url($s['url'] ?? '#', '#')); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($s['title']); ?></a>
                                         <?php endforeach; ?>
                                     </div>
                                     <?php endif; ?>
@@ -309,16 +332,16 @@ $thm_primary_glow = $thm_primary . '4D';
                     </ul>
                     <div class="social-icons">
                         <?php if(!empty($footer_social_twitter) && $footer_social_twitter !== '#'): ?>
-                        <a href="<?php echo htmlspecialchars($footer_social_twitter); ?>" aria-label="Twitter"><i class="fab fa-x-twitter"></i></a>
+                        <a href="<?php echo htmlspecialchars($footer_social_twitter); ?>" target="_blank" rel="noopener noreferrer" aria-label="Twitter"><i class="fab fa-x-twitter"></i></a>
                         <?php endif; ?>
                         <?php if(!empty($footer_social_facebook) && $footer_social_facebook !== '#'): ?>
-                        <a href="<?php echo htmlspecialchars($footer_social_facebook); ?>" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+                        <a href="<?php echo htmlspecialchars($footer_social_facebook); ?>" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
                         <?php endif; ?>
                         <?php if(!empty($footer_social_youtube) && $footer_social_youtube !== '#'): ?>
-                        <a href="<?php echo htmlspecialchars($footer_social_youtube); ?>" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                        <a href="<?php echo htmlspecialchars($footer_social_youtube); ?>" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
                         <?php endif; ?>
                         <?php if(!empty($footer_social_instagram) && $footer_social_instagram !== '#'): ?>
-                        <a href="<?php echo htmlspecialchars($footer_social_instagram); ?>" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                        <a href="<?php echo htmlspecialchars($footer_social_instagram); ?>" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
                         <?php endif; ?>
                         
                         <!-- Search Icon -->

@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -20,15 +21,23 @@ $conn->query("CREATE TABLE IF NOT EXISTS pegawai (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
-// Handle DELETE
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM pegawai WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    if ($stmt->execute()) {
-        $_SESSION['flash_success'] = "Data pegawai berhasil dihapus.";
-    } else {
-        $_SESSION['flash_error'] = "Gagal menghapus data pegawai.";
+// Handle DELETE (CSRF POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = "Token keamanan tidak valid.";
+        header("Location: pegawai.php");
+        exit;
+    }
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id > 0) {
+        $stmt = $conn->prepare("DELETE FROM pegawai WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
+            $_SESSION['flash_success'] = "Data pegawai berhasil dihapus.";
+        } else {
+            $_SESSION['flash_error'] = "Gagal menghapus data pegawai.";
+        }
+        $stmt->close();
     }
     header("Location: pegawai.php");
     exit;
@@ -122,7 +131,7 @@ require_once 'layout_header.php';
     </h2>
     <p style="color:#64748b; margin-top:5px;">
         Kelola data pegawai PNS dan PPPK. URL halaman publik:
-        <a href="../data_pegawai.php" target="_blank" style="color:var(--primary); font-weight:600;">data_pegawai.php</a>
+        <a href="../data_pegawai.php" target="_blank" rel="noopener noreferrer" style="color:var(--primary); font-weight:600;">data_pegawai.php</a>
     </p>
 </div>
 
@@ -232,13 +241,17 @@ require_once 'layout_header.php';
                     <td style="font-family:monospace; font-size:13px; color:#64748b;"><?php echo htmlspecialchars($p['nip']); ?></td>
                     <td style="color:#475569;"><?php echo htmlspecialchars($p['jabatan']); ?></td>
                     <td style="text-align:right; white-space:nowrap;">
-                        <a href="pegawai.php?edit=<?php echo $p['id']; ?>" class="btn-action edit" title="Edit">
+                        <a href="pegawai.php?edit=<?php echo (int)$p['id']; ?>" class="btn-action edit" title="Edit">
                             <i class="fas fa-edit"></i>
                         </a>
-                        <a href="pegawai.php?delete=<?php echo $p['id']; ?>" class="btn-action delete" title="Hapus"
-                           onclick="return confirm('Hapus data pegawai ini?');">
-                            <i class="fas fa-trash"></i>
-                        </a>
+                        <form method="post" action="pegawai.php" style="display:inline;" onsubmit="return confirm('Hapus data pegawai ini?');">
+                            <?php echo csrf_token_field(); ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?php echo (int)$p['id']; ?>">
+                            <button type="submit" class="btn-action delete" title="Hapus">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </form>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -286,13 +299,17 @@ require_once 'layout_header.php';
                     <td style="font-family:monospace; font-size:13px; color:#64748b;"><?php echo htmlspecialchars($p['nip']); ?></td>
                     <td style="color:#475569;"><?php echo htmlspecialchars($p['jabatan']); ?></td>
                     <td style="text-align:right; white-space:nowrap;">
-                        <a href="pegawai.php?edit=<?php echo $p['id']; ?>" class="btn-action edit" title="Edit">
+                        <a href="pegawai.php?edit=<?php echo (int)$p['id']; ?>" class="btn-action edit" title="Edit">
                             <i class="fas fa-edit"></i>
                         </a>
-                        <a href="pegawai.php?delete=<?php echo $p['id']; ?>" class="btn-action delete" title="Hapus"
-                           onclick="return confirm('Hapus data pegawai ini?');">
-                            <i class="fas fa-trash"></i>
-                        </a>
+                        <form method="post" action="pegawai.php" style="display:inline;" onsubmit="return confirm('Hapus data pegawai ini?');">
+                            <?php echo csrf_token_field(); ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?php echo (int)$p['id']; ?>">
+                            <button type="submit" class="btn-action delete" title="Hapus">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </form>
                     </td>
                 </tr>
                 <?php endforeach; ?>

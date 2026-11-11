@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -21,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'logo_text_2' => $_POST['logo_text_2'] ?? '',
         'header_alert_show' => isset($_POST['header_alert_show']) ? '1' : '0',
         'header_alert_text' => $_POST['header_alert_text'] ?? '',
-        'header_alert_color' => $_POST['header_alert_color'] ?? '#f59e0b'
+        'header_alert_color' => bapenda_safe_css_color($_POST['header_alert_color'] ?? '#f59e0b', '#f59e0b')
     ];
     
     // Process up to 9 menu items
@@ -36,55 +38,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $settings["profil_sub_{$i}_link"] = $_POST["profil_sub_{$i}_link"] ?? '#';
     }
 
-    if (isset($_FILES['logo_image']) && $_FILES['logo_image']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
-        $max_size = 2 * 1024 * 1024; // 2MB
-        $file_tmp = $_FILES['logo_image']['tmp_name'];
-        $file_name = $_FILES['logo_image']['name'];
-        $file_size = $_FILES['logo_image']['size'];
-        
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $file_type = finfo_file($finfo, $file_tmp);
-        finfo_close($finfo);
-
-        if (in_array($file_type, $allowed) && $file_size <= $max_size) {
-            $upload_dir = '../assets/img/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-            $new_fn = 'logo_' . time() . '.' . $ext;
-            if (move_uploaded_file($file_tmp, $upload_dir . $new_fn)) {
-                $settings['logo_image'] = 'assets/img/uploads/' . $new_fn;
-            } else {
-                $_SESSION['flash_error'] = "Gagal mengunggah logo.";
-            }
+    if (bapenda_has_uploaded_file($_FILES['logo_image'] ?? [])) {
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES['logo_image'],
+            __DIR__ . '/../assets/img/uploads',
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp'],
+            2 * 1024 * 1024,
+            'logo',
+            $upErr
+        );
+        if ($saved !== null) {
+            $settings['logo_image'] = $saved;
         } else {
-            $_SESSION['flash_error'] = "Format/Ukuran Logo tidak valid! Maks: 2MB, Format: JPG/PNG/WEBP/SVG.";
+            $_SESSION['flash_error'] = $upErr;
         }
     }
 
-    if (isset($_FILES['favicon_image']) && $_FILES['favicon_image']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/x-icon', 'image/svg+xml', 'image/vnd.microsoft.icon'];
-        $max_size = 500 * 1024; // 500KB
-        $file_tmp = $_FILES['favicon_image']['tmp_name'];
-        $file_name = $_FILES['favicon_image']['name'];
-        $file_size = $_FILES['favicon_image']['size'];
-        
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $file_type = finfo_file($finfo, $file_tmp);
-        finfo_close($finfo);
-
-        if (in_array($file_type, $allowed) && $file_size <= $max_size) {
-            $upload_dir = '../assets/img/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-            $new_fn = 'favicon_' . time() . '.' . $ext;
-            if (move_uploaded_file($file_tmp, $upload_dir . $new_fn)) {
-                $settings['favicon_image'] = 'assets/img/uploads/' . $new_fn;
-            } else {
-                $_SESSION['flash_error'] = "Gagal mengunggah favicon.";
-            }
+    if (bapenda_has_uploaded_file($_FILES['favicon_image'] ?? [])) {
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES['favicon_image'],
+            __DIR__ . '/../assets/img/uploads',
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp', 'ico'],
+            500 * 1024,
+            'favicon',
+            $upErr
+        );
+        if ($saved !== null) {
+            $settings['favicon_image'] = $saved;
         } else {
-            $_SESSION['flash_error'] = "Format/Ukuran Favicon tidak valid! Maks: 500KB, Format: JPG/PNG/WEBP/ICO/SVG.";
+            $_SESSION['flash_error'] = $upErr;
         }
     }
 
@@ -129,7 +115,7 @@ require_once 'layout_header.php';
 
 <?php if($message): ?>
     <div class="alert" style="background:<?php echo $msg_type === 'error' ? '#fee2e2' : '#d1fae5'; ?>; color:<?php echo $msg_type === 'error' ? '#991b1b' : '#065f46'; ?>; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $message; ?>
+        <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 

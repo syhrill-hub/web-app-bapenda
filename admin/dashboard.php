@@ -1,13 +1,19 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
 // Cek autentikasi & sinkronisasi status/role user
 require_admin_login($conn);
 
-// Handle Reset Logs
+// Handle Reset Logs (khusus Super Admin)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_logs') {
+    if ((int)($_SESSION['admin_role_id'] ?? 0) !== 1) {
+        $_SESSION['flash_error'] = "Hanya Super Admin yang dapat membersihkan data log pengunjung.";
+        header("Location: dashboard.php");
+        exit;
+    }
     if (verify_csrf_token($_POST['csrf_token'] ?? '')) {
         $conn->query("TRUNCATE TABLE visitor_logs");
         $_SESSION['flash_success'] = "✅ Data pengunjung berhasil dikosongkan. Sistem sekarang merekam dari awal.";
@@ -175,7 +181,7 @@ if ($res_top) {
             Swal.fire({
                 icon: 'success',
                 title: 'Berhasil',
-                text: '<?php echo addslashes($_SESSION['flash_success']); ?>',
+                text: <?php echo bapenda_json_encode((string)$_SESSION['flash_success']); ?>,
                 confirmButtonColor: 'var(--primary)',
                 customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-btn' }
             });
@@ -189,7 +195,7 @@ if ($res_top) {
             Swal.fire({
                 icon: 'error',
                 title: 'Gagal',
-                text: '<?php echo addslashes($_SESSION['flash_error']); ?>',
+                text: <?php echo bapenda_json_encode((string)$_SESSION['flash_error']); ?>,
                 confirmButtonColor: 'var(--primary)',
                 customClass: { popup: 'swal-custom-popup', confirmButton: 'swal-custom-btn' }
             });
@@ -202,6 +208,7 @@ if ($res_top) {
             <h2><i class="fas fa-chart-line" style="color:var(--primary);margin-right:10px;"></i> Dashboard Analitik</h2>
             <p class="text-muted" style="margin-bottom:0;">Statistik kunjungan pada website Bapenda secara real-time.</p>
         </div>
+        <?php if ((int)($_SESSION['admin_role_id'] ?? 0) === 1): ?>
         <form method="post" style="margin:0;">
             <input type="hidden" name="action" value="reset_logs">
             <?php echo csrf_token_field(); ?>
@@ -225,6 +232,7 @@ if ($res_top) {
                 <i class="fas fa-trash-alt"></i> Bersihkan Data Log
             </button>
         </form>
+        <?php endif; ?>
     </div>
 
     <!-- Summary Cards -->
@@ -328,10 +336,10 @@ document.addEventListener("DOMContentLoaded", function() {
     new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: <?php echo json_encode($chart_labels); ?>,
+            labels: <?php echo bapenda_json_encode($chart_labels); ?>,
             datasets: [{
                 label: 'Jumlah Kunjungan',
-                data: <?php echo json_encode($chart_values); ?>,
+                data: <?php echo bapenda_json_encode($chart_values); ?>,
                 backgroundColor: 'rgba(14, 165, 233, 0.25)',
                 borderColor: '#0ea5e9',
                 borderWidth: 2,

@@ -31,7 +31,7 @@ require_once 'includes/header.php';
         <div class="news-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px;">
             <?php foreach ($all_news as $n): ?>
             <div class="news-card" style="background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.02); transition: var(--transition);">
-                <div class="news-image" style="height: 220px; background-image: url('<?php echo htmlspecialchars($n['image_url']); ?>'); background-size: cover; background-position: center; position: relative;">
+                <div class="news-image" style="height: 220px; background-image: url('<?php echo htmlspecialchars(bapenda_safe_css_bg_url($n['image_url'], 'assets/img/news-placeholder.jpg')); ?>'); background-size: cover; background-position: center; position: relative;">
                     <span class="news-date-badge" style="position: absolute; bottom: 15px; left: 15px; background: rgba(255,255,255,0.9); backdrop-filter: blur(5px); color: var(--primary); padding: 8px 15px; border-radius: var(--radius-md); box-shadow: 0 4px 10px rgba(0,0,0,0.05); font-size: 13px; font-weight: 600;">
                         <i class="far fa-calendar-alt"></i> <?php echo date('d M Y', strtotime($n['created_at'])); ?>
                     </span>

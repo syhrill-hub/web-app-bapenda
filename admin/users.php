@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -27,8 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     } elseif ($id === 1) {
         $_SESSION['flash_error'] = "Akun Super Admin utama tidak dapat dihapus!";
     } else {
-        // Cegah non-Super-Admin menghapus akun Super Admin
-        $stmt_target = $conn->prepare("SELECT role_id FROM users WHERE id = ? LIMIT 1");
+        // Cegah non-Super-Admin menghapus akun dengan hak akses di luar kewenangannya
+        $stmt_target = $conn->prepare("SELECT u.role_id, r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ? LIMIT 1");
         $stmt_target->bind_param("i", $id);
         $stmt_target->execute();
         $target_row = $stmt_target->get_result()->fetch_assoc();
@@ -36,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
         if (!$target_row) {
             $_SESSION['flash_error'] = "Pengguna tidak ditemukan.";
-        } elseif ((int)$target_row['role_id'] === 1 && $current_role_id !== 1) {
-            $_SESSION['flash_error'] = "Hanya Super Admin yang dapat menghapus akun Super Admin.";
+        } elseif ($current_role_id !== 1 && ((int)$target_row['role_id'] === 1 || !actor_can_manage_permissions((string)($target_row['role_permissions'] ?? '')))) {
+            $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat menghapus pengguna dengan hak akses di luar kewenangan Anda.";
         } else {
             $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
             $stmt->bind_param("i", $id);
@@ -69,7 +70,7 @@ if ($has_is_active && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action']
     } elseif ($id === 1) {
         $_SESSION['flash_error'] = "Akun Super Admin utama tidak dapat dinonaktifkan!";
     } else {
-        $stmt_target = $conn->prepare("SELECT role_id, is_active FROM users WHERE id = ? LIMIT 1");
+        $stmt_target = $conn->prepare("SELECT u.role_id, u.is_active, r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ? LIMIT 1");
         $stmt_target->bind_param("i", $id);
         $stmt_target->execute();
         $target_row = $stmt_target->get_result()->fetch_assoc();
@@ -77,8 +78,8 @@ if ($has_is_active && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action']
 
         if (!$target_row) {
             $_SESSION['flash_error'] = "Pengguna tidak ditemukan.";
-        } elseif ((int)$target_row['role_id'] === 1 && $current_role_id !== 1) {
-            $_SESSION['flash_error'] = "Hanya Super Admin yang dapat mengubah status akun Super Admin.";
+        } elseif ($current_role_id !== 1 && ((int)$target_row['role_id'] === 1 || !actor_can_manage_permissions((string)($target_row['role_permissions'] ?? '')))) {
+            $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat mengubah status pengguna dengan hak akses di luar kewenangan Anda.";
         } else {
             $new_status = ((int)$target_row['is_active'] === 1) ? 0 : 1;
             $stmt_upd = $conn->prepare("UPDATE users SET is_active = ? WHERE id = ?");
@@ -140,9 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         exit;
     }
 
-    // Cegah non-Super-Admin mengangkat role menjadi Super Admin (id=1)
-    if ($role_id === 1 && $current_role_id !== 1) {
-        $_SESSION['flash_error'] = "Hanya Super Admin yang dapat menetapkan role Super Admin.";
+    // Cegah non-Super-Admin mengangkat role menjadi Super Admin (id=1) atau role di atas hak aksesnya
+    if ($current_role_id !== 1 && ($role_id === 1 || !actor_can_manage_permissions((string)($role_data['permissions'] ?? '')))) {
+        $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat menetapkan role dengan hak akses di luar kewenangan Anda.";
         header("Location: users.php");
         exit;
     }
@@ -153,8 +154,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
             header("Location: users.php");
             exit;
         }
-        if (strlen($password) < 6) {
-            $_SESSION['flash_error'] = "Password minimal harus 6 karakter!";
+        if (strlen($password) < 8) {
+            $_SESSION['flash_error'] = "Password minimal harus 8 karakter!";
             header("Location: users.php");
             exit;
         }
@@ -186,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         }
         $stmt->close();
     } elseif ($action === 'edit' && $id > 0) {
-        $stmt_existing = $conn->prepare("SELECT id, role_id FROM users WHERE id = ? LIMIT 1");
+        $stmt_existing = $conn->prepare("SELECT u.id, u.role_id, r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ? LIMIT 1");
         $stmt_existing->bind_param("i", $id);
         $stmt_existing->execute();
         $existing_user = $stmt_existing->get_result()->fetch_assoc();
@@ -198,8 +199,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
             exit;
         }
 
-        if ((int)$existing_user['role_id'] === 1 && $current_role_id !== 1) {
-            $_SESSION['flash_error'] = "Hanya Super Admin yang dapat mengedit akun Super Admin.";
+        if ($current_role_id !== 1 && ((int)$existing_user['role_id'] === 1 || !actor_can_manage_permissions((string)($existing_user['role_permissions'] ?? '')))) {
+            $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat mengedit pengguna dengan hak akses di luar kewenangan Anda.";
+            header("Location: users.php");
+            exit;
+        }
+
+        if ($current_role_id !== 1 && $id === $current_admin_id && $role_id !== (int)$existing_user['role_id']) {
+            $_SESSION['flash_error'] = "Anda tidak dapat mengubah role akun Anda sendiri.";
             header("Location: users.php");
             exit;
         }
@@ -214,8 +221,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
             $is_active = 1;
         }
 
-        if ($password !== '' && strlen($password) < 6) {
-            $_SESSION['flash_error'] = "Password baru minimal harus 6 karakter!";
+        if ($password !== '' && strlen($password) < 8) {
+            $_SESSION['flash_error'] = "Password baru minimal harus 8 karakter!";
             header("Location: users.php");
             exit;
         }
@@ -254,6 +261,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         if ($stmt->execute()) {
             $_SESSION['flash_success'] = "Data pengguna berhasil diperbarui.";
             if ($id === $current_admin_id) {
+                if ($password !== '') {
+                    session_regenerate_id(true);
+                    rotate_csrf_token();
+                }
                 sync_current_user_session($conn, true);
             }
         } else {
@@ -272,7 +283,7 @@ require_once 'layout_header.php';
 // Ambil data users
 $users = [];
 $active_col = $has_is_active ? ", u.is_active" : "";
-$res = $conn->query("SELECT u.id, u.username, u.full_name, u.email, u.role_id{$active_col}, r.name as role_name, u.created_at FROM users u LEFT JOIN roles r ON u.role_id = r.id ORDER BY u.id ASC");
+$res = $conn->query("SELECT u.id, u.username, u.full_name, u.email, u.role_id{$active_col}, r.name as role_name, r.permissions as role_permissions, u.created_at FROM users u LEFT JOIN roles r ON u.role_id = r.id ORDER BY u.id ASC");
 if ($res) {
     while ($row = $res->fetch_assoc()) {
         $users[] = $row;
@@ -281,7 +292,7 @@ if ($res) {
 
 // Ambil daftar role untuk dropdown
 $roles_list = [];
-$roles_res = $conn->query("SELECT id, name FROM roles ORDER BY id ASC");
+$roles_res = $conn->query("SELECT id, name, permissions FROM roles ORDER BY id ASC");
 if ($roles_res) {
     while ($rd = $roles_res->fetch_assoc()) {
         $roles_list[] = $rd;
@@ -329,7 +340,7 @@ if ($roles_res) {
                             $uid = (int)$u['id'];
                             $u_role_id = (int)$u['role_id'];
                             $u_active = $has_is_active ? ((int)($u['is_active'] ?? 1) === 1) : true;
-                            $can_manage_target = ($u_role_id !== 1 || $current_role_id === 1);
+                            $can_manage_target = ($current_role_id === 1) || ($u_role_id !== 1 && actor_can_manage_permissions((string)($u['role_permissions'] ?? '')));
                             $user_payload = [
                                 'id' => $uid,
                                 'full_name' => (string)($u['full_name'] ?? ''),
@@ -338,7 +349,7 @@ if ($roles_res) {
                                 'role_id' => $u_role_id,
                                 'is_active' => $u_active ? 1 : 0,
                             ];
-                            $user_json = htmlspecialchars(json_encode($user_payload), ENT_QUOTES, 'UTF-8');
+                            $user_json = htmlspecialchars(bapenda_json_encode($user_payload), ENT_QUOTES, 'UTF-8');
                         ?>
                         <tr>
                             <td><?php echo $idx + 1; ?></td>
@@ -373,12 +384,12 @@ if ($roles_res) {
                                 <?php if ($can_manage_target): ?>
                                     <button type="button" class="btn-action edit" onclick="editUser(<?php echo $user_json; ?>)"><i class="fas fa-edit"></i> Edit</button>
                                     <?php if ($has_is_active && $uid !== $current_admin_id && $uid !== 1): ?>
-                                        <button type="button" class="btn-action" style="background:<?php echo $u_active ? '#fef3c7; color:#b45309;' : '#dcfce7; color:#15803d;'; ?>" title="<?php echo $u_active ? 'Nonaktifkan Akun' : 'Aktifkan Akun'; ?>" onclick="toggleUserActive(<?php echo $uid; ?>, <?php echo htmlspecialchars(json_encode($user_payload['username']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo $u_active ? 'false' : 'true'; ?>)">
+                                        <button type="button" class="btn-action" style="background:<?php echo $u_active ? '#fef3c7; color:#b45309;' : '#dcfce7; color:#15803d;'; ?>" title="<?php echo $u_active ? 'Nonaktifkan Akun' : 'Aktifkan Akun'; ?>" onclick="toggleUserActive(<?php echo $uid; ?>, <?php echo htmlspecialchars(bapenda_json_encode($user_payload['username']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo $u_active ? 'false' : 'true'; ?>)">
                                             <i class="fas <?php echo $u_active ? 'fa-user-slash' : 'fa-user-check'; ?>"></i>
                                         </button>
                                     <?php endif; ?>
                                     <?php if ($uid !== $current_admin_id && $uid !== 1): ?>
-                                        <button type="button" class="btn-action delete" onclick="confirmDelete(<?php echo $uid; ?>, <?php echo htmlspecialchars(json_encode($user_payload['username']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-trash"></i></button>
+                                        <button type="button" class="btn-action delete" onclick="confirmDelete(<?php echo $uid; ?>, <?php echo htmlspecialchars(bapenda_json_encode($user_payload['username']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-trash"></i></button>
                                     <?php endif; ?>
                                 <?php else: ?>
                                     <span style="color:#94a3b8; font-size:12px;"><i class="fas fa-lock"></i> Terkunci</span>
@@ -433,12 +444,12 @@ if ($roles_res) {
                     <option value="">-- Pilih Role --</option>
                     <?php foreach ($roles_list as $rd):
                         $rd_id = (int)$rd['id'];
-                        if ($rd_id === 1 && $current_role_id !== 1) continue;
+                        if ($current_role_id !== 1 && ($rd_id === 1 || !actor_can_manage_permissions((string)($rd['permissions'] ?? '')))) continue;
                     ?>
                         <option value="<?php echo $rd_id; ?>"><?php echo htmlspecialchars($rd['name']); ?></option>
                     <?php endforeach; ?>
                 </select>
-                <small id="roleLockNote" style="display:none; color:#ea580c; font-weight:600; margin-top:4px;"><i class="fas fa-lock"></i> Role akun Super Admin utama tidak dapat diubah.</small>
+                <small id="roleLockNote" style="display:none; color:#ea580c; font-weight:600; margin-top:4px;"><i class="fas fa-lock"></i> <span id="roleLockNoteText">Role akun Super Admin utama tidak dapat diubah.</span></small>
             </div>
             <?php if ($has_is_active): ?>
             <div class="form-group" id="statusGroup">
@@ -452,7 +463,7 @@ if ($roles_res) {
             <div class="form-group">
                 <label>Password <small style="font-weight:normal;" id="passHelp">(Kosongkan jika tidak ingin mengubah)</small></label>
                 <div style="position:relative;">
-                    <input type="password" name="password" id="formPassword" class="form-control" minlength="6" autocomplete="new-password" style="padding-right:42px;">
+                    <input type="password" name="password" id="formPassword" class="form-control" minlength="8" autocomplete="new-password" style="padding-right:42px;">
                     <button type="button" onclick="toggleFormPassword()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:#64748b;" title="Lihat/Sembunyikan Password">
                         <i class="fas fa-eye" id="formPasswordEye"></i>
                     </button>
@@ -468,6 +479,7 @@ if ($roles_res) {
 
 <script>
 const CURRENT_ADMIN_ID = <?php echo $current_admin_id; ?>;
+const CURRENT_IS_SUPER_ADMIN = <?php echo ($current_role_id === 1) ? 'true' : 'false'; ?>;
 const HAS_IS_ACTIVE = <?php echo $has_is_active ? 'true' : 'false'; ?>;
 
 function resetPasswordVisibility() {
@@ -516,7 +528,7 @@ function openModal(type) {
 
     resetPasswordVisibility();
     document.getElementById('formPassword').required = true;
-    document.getElementById('passHelp').innerText = '(Wajib diisi, minimal 6 karakter)';
+    document.getElementById('passHelp').innerText = '(Wajib diisi, minimal 8 karakter)';
     document.getElementById('userModal').style.display = 'flex';
 }
 
@@ -524,6 +536,7 @@ function editUser(data) {
     const targetId = Number(data.id);
     const isPrimarySuperAdmin = (targetId === 1);
     const isSelf = (targetId === CURRENT_ADMIN_ID);
+    const lockRole = isPrimarySuperAdmin || (isSelf && !CURRENT_IS_SUPER_ADMIN);
 
     document.getElementById('modalTitle').innerText = 'Edit Pengguna';
     document.getElementById('formAction').value = 'edit';
@@ -534,8 +547,11 @@ function editUser(data) {
 
     const roleSelect = document.getElementById('formRole');
     roleSelect.value = String(data.role_id || '');
-    roleSelect.disabled = isPrimarySuperAdmin;
-    document.getElementById('roleLockNote').style.display = isPrimarySuperAdmin ? 'block' : 'none';
+    roleSelect.disabled = lockRole;
+    document.getElementById('roleLockNoteText').textContent = isPrimarySuperAdmin
+        ? 'Role akun Super Admin utama tidak dapat diubah.'
+        : 'Anda tidak dapat mengubah role akun Anda sendiri.';
+    document.getElementById('roleLockNote').style.display = lockRole ? 'block' : 'none';
 
     if (HAS_IS_ACTIVE) {
         const activeSelect = document.getElementById('formIsActive');
@@ -545,7 +561,7 @@ function editUser(data) {
 
     resetPasswordVisibility();
     document.getElementById('formPassword').required = false;
-    document.getElementById('passHelp').innerText = '(Kosongkan jika tidak ingin mengubah, minimal 6 karakter)';
+    document.getElementById('passHelp').innerText = '(Kosongkan jika tidak ingin mengubah, minimal 8 karakter)';
     document.getElementById('userModal').style.display = 'flex';
 }
 

@@ -1,13 +1,27 @@
 <?php
+require_once __DIR__ . '/../../includes/security_helpers.php';
+
+if (!defined('ADMIN_SESSION_IDLE_TIMEOUT')) {
+    define('ADMIN_SESSION_IDLE_TIMEOUT', 3600); // 60 menit idle timeout
+}
+
 function generate_csrf_token() {
-    if (empty($_SESSION['csrf_token'])) {
+    if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     }
     return $_SESSION['csrf_token'];
 }
 
+function rotate_csrf_token() {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    return $_SESSION['csrf_token'];
+}
+
 function verify_csrf_token($token) {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+    return is_string($token)
+        && isset($_SESSION['csrf_token'])
+        && is_string($_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], $token);
 }
 
 function csrf_token_field() {
@@ -156,9 +170,42 @@ function force_admin_logout($reason = '') {
     if (!headers_sent()) {
         header("Location: " . $target);
     } else {
-        echo "<script>window.location.href=" . json_encode($target) . ";</script>";
+        echo "<script>window.location.href=" . bapenda_json_encode($target) . ";</script>";
     }
     exit;
+}
+
+function get_current_effective_permissions() {
+    if ((int)($_SESSION['admin_role_id'] ?? 0) === 1) {
+        return array_keys(get_available_permissions());
+    }
+    $perm_str = (string)($_SESSION['admin_permissions'] ?? '');
+    $raw_perms = array_filter(array_map('trim', explode(',', $perm_str)), function ($p) {
+        return $p !== '';
+    });
+    if (in_array('all', $raw_perms, true)) {
+        return array_keys(get_available_permissions());
+    }
+    $expanded = expand_permissions($perm_str);
+    return array_values(array_unique(array_merge($raw_perms, $expanded)));
+}
+
+/**
+ * Returns true if the current actor is Super Admin (role_id === 1) or holds
+ * every canonical permission present in $perm_string (prevents privilege escalation).
+ */
+function actor_can_manage_permissions($perm_string) {
+    if ((int)($_SESSION['admin_role_id'] ?? 0) === 1) {
+        return true;
+    }
+    $actor_perms = get_current_effective_permissions();
+    $target_perms = expand_permissions((string)$perm_string);
+    foreach ($target_perms as $perm) {
+        if (!in_array($perm, $actor_perms, true)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -180,7 +227,7 @@ function sync_current_user_session($conn = null, $force = false) {
         $conn = $GLOBALS['conn'] ?? null;
     }
     if (!($conn instanceof mysqli) || $conn->connect_errno) {
-        return true;
+        return false;
     }
 
     $admin_id = (int)$_SESSION['admin_id'];
@@ -189,7 +236,7 @@ function sync_current_user_session($conn = null, $force = false) {
 
     $stmt = $conn->prepare("SELECT u.id, u.username, u.full_name, u.role_id{$active_select}, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ? LIMIT 1");
     if (!$stmt) {
-        return true;
+        return false;
     }
 
     $stmt->bind_param("i", $admin_id);
@@ -221,13 +268,21 @@ function sync_current_user_session($conn = null, $force = false) {
  */
 function require_admin_login($conn = null) {
     if (session_status() === PHP_SESSION_NONE) {
-        session_start();
+        bapenda_start_secure_session();
     }
     if (empty($_SESSION['admin_id'])) {
         header("Location: login.php");
         exit;
     }
-    sync_current_user_session($conn);
+    $now = time();
+    if (isset($_SESSION['last_activity']) && ($now - (int)$_SESSION['last_activity']) > ADMIN_SESSION_IDLE_TIMEOUT) {
+        force_admin_logout('timeout');
+    }
+    $_SESSION['last_activity'] = $now;
+
+    if (!sync_current_user_session($conn)) {
+        force_admin_logout();
+    }
 }
 
 function has_permission($required_perm) {

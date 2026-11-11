@@ -32,7 +32,7 @@ require_once 'includes/header.php';
         
         <article class="news-detail" style="background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-soft);">
             <?php if (!empty($news['image_url'])): ?>
-            <div class="news-detail-image" style="width: 100%; height: 400px; background-image: url('<?php echo htmlspecialchars($news['image_url']); ?>'); background-size: cover; background-position: center;"></div>
+            <div class="news-detail-image" style="width: 100%; height: 400px; background-image: url('<?php echo htmlspecialchars(bapenda_safe_css_bg_url($news['image_url'])); ?>'); background-size: cover; background-position: center;"></div>
             <?php endif; ?>
             
             <div class="news-detail-content" style="padding: 40px;">

@@ -1,5 +1,18 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
+require_once 'includes/security.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verify_csrf_token($_POST['csrf_token'] ?? '')) {
+    if (!empty($_SESSION['admin_id'])) {
+        $_SESSION['flash_error'] = "Permintaan keluar harus melalui tombol Keluar Panel yang valid.";
+        header("Location: dashboard.php");
+        exit;
+    }
+    header("Location: login.php");
+    exit;
+}
+
 $_SESSION = [];
 
 if (ini_get('session.use_cookies')) {

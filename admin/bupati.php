@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) { header("Location: login.php"); exit; }
 require_permission('menu_content_bupati');
@@ -20,31 +22,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'bupati_show'       => isset($_POST['bupati_show']) ? '1' : '0',
     ];
 
-    // Upload helper
-    function handle_photo_upload($field_name, $prefix, $conn) {
-        if (!isset($_FILES[$field_name]) || $_FILES[$field_name]['error'] !== UPLOAD_ERR_OK) return null;
-        $allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        $max_size = 3 * 1024 * 1024; // 3MB
-        $tmp = $_FILES[$field_name]['tmp_name'];
-        $orig_name = $_FILES[$field_name]['name'];
-        if ($_FILES[$field_name]['size'] > $max_size) { $_SESSION['flash_error'] = "Ukuran foto maks 3MB."; return null; }
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $mime = finfo_file($finfo, $tmp); finfo_close($finfo);
-        if (!in_array($mime, $allowed)) { $_SESSION['flash_error'] = "Format foto tidak valid! Gunakan JPG/PNG/WEBP."; return null; }
-        $upload_dir = '../assets/img/uploads/';
-        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-        $ext = pathinfo($orig_name, PATHINFO_EXTENSION);
-        $new_fn = $prefix . '_' . time() . '.' . $ext;
-        if (move_uploaded_file($tmp, $upload_dir . $new_fn)) {
-            return 'assets/img/uploads/' . $new_fn;
+    function handle_photo_upload($field_name, $prefix) {
+        if (!bapenda_has_uploaded_file($_FILES[$field_name] ?? [])) {
+            return null;
         }
-        return null;
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES[$field_name],
+            __DIR__ . '/../assets/img/uploads',
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp'],
+            3 * 1024 * 1024,
+            $prefix,
+            $upErr
+        );
+        if ($saved === null && $upErr) {
+            $_SESSION['flash_error'] = $upErr;
+        }
+        return $saved;
     }
 
-    $bupati_photo = handle_photo_upload('bupati_foto', 'bupati', $conn);
+    $bupati_photo = handle_photo_upload('bupati_foto', 'bupati');
     if ($bupati_photo) $settings_to_save['bupati_foto'] = $bupati_photo;
 
-    $wakil_photo = handle_photo_upload('wakil_foto', 'wakil', $conn);
+    $wakil_photo = handle_photo_upload('wakil_foto', 'wakil');
     if ($wakil_photo) $settings_to_save['wakil_foto'] = $wakil_photo;
 
     foreach ($settings_to_save as $key => $val) {
@@ -174,7 +175,7 @@ require_once 'layout_header.php';
         <div style="margin-top:28px;padding:18px;background:#1e293b;border-radius:12px;color:#fff;font-size:13px;text-align:center;">
             <i class="fas fa-eye" style="margin-right:6px;color:#38bdf8;"></i>
             Foto akan ditampilkan di <strong>sisi kiri</strong> (Bupati) dan <strong>sisi kanan</strong> (Wakil Bupati) dari banner utama halaman depan.
-            <a href="../index.php" target="_blank" style="color:#38bdf8;margin-left:10px;text-decoration:none;"><i class="fas fa-external-link-alt" style="margin-right:4px;"></i>Lihat Halaman Utama</a>
+            <a href="../index.php" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;margin-left:10px;text-decoration:none;"><i class="fas fa-external-link-alt" style="margin-right:4px;"></i>Lihat Halaman Utama</a>
         </div>
 
         <div style="margin-top:24px;text-align:right;">

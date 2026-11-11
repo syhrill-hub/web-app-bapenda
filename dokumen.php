@@ -30,7 +30,7 @@ if ($res) {
             <?php else: ?>
             <div style="display:flex; flex-direction:column; gap:15px;">
                 <?php foreach($items as $item): ?>
-                <a href="<?php echo htmlspecialchars($item['file_url']); ?>" target="_blank" style="display:flex; align-items:center; padding:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; text-decoration:none; transition:all 0.2s ease;" onmouseover="this.style.background='white'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.05)'" onmouseout="this.style.background='#f8fafc'; this.style.boxShadow='none'">
+                <a href="<?php echo htmlspecialchars(bapenda_safe_url($item['file_url'] ?? '#', '#')); ?>" target="_blank" rel="noopener noreferrer" style="display:flex; align-items:center; padding:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; text-decoration:none; transition:all 0.2s ease;" onmouseover="this.style.background='white'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.05)'" onmouseout="this.style.background='#f8fafc'; this.style.boxShadow='none'">
                     <i class="fas fa-file-pdf" style="font-size:32px; color:var(--primary); margin-right:20px;"></i>
                     <div style="flex:1;">
                         <h4 style="margin:0 0 5px 0; color:var(--text-dark); font-size:16px;"><?php echo htmlspecialchars($item['title']); ?></h4>

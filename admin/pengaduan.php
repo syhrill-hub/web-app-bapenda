@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -9,35 +11,76 @@ if (!isset($_SESSION['admin_id'])) {
 }
 require_permission('menu_report_pengaduan');
 
+$pengaduan_upload_dir = __DIR__ . '/../assets/uploads/pengaduan';
+bapenda_ensure_upload_dir($pengaduan_upload_dir, true);
+
 $page_title = 'Layanan Pengaduan';
 
-// Update Status & Tanggapan
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_status') {
-    $id = $_POST['id'] ?? 0;
-    $status = $_POST['status'] ?? '';
-    $admin_response = $_POST['admin_response'] ?? '';
-    
-    if (in_array($status, ['pending', 'processed', 'completed'])) {
-        $stmt = $conn->prepare("UPDATE pengaduan SET status=?, admin_response=? WHERE id=?");
-        $stmt->bind_param("ssi", $status, $admin_response, $id);
-        if ($stmt->execute()) {
-            $_SESSION['flash_success'] = "Status & Tanggapan berhasil disimpan!";
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = "Token keamanan tidak valid.";
+        header("Location: pengaduan.php");
+        exit;
     }
-    header("Location: pengaduan.php");
-    exit;
-}
 
-// Hapus Laporan
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $id = $_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM pengaduan WHERE id=?");
-    $stmt->bind_param("i", $id);
-    if ($stmt->execute()) {
-        $_SESSION['flash_success'] = "Laporan berhasil dihapus!";
+    $action = $_POST['action'] ?? '';
+
+    // Update Status & Tanggapan
+    if ($action === 'update_status') {
+        $id = (int)($_POST['id'] ?? 0);
+        $status = $_POST['status'] ?? '';
+        $admin_response = trim((string)($_POST['admin_response'] ?? ''));
+
+        if ($id > 0 && in_array($status, ['pending', 'processed', 'completed'], true)) {
+            $stmt = $conn->prepare("UPDATE pengaduan SET status=?, admin_response=? WHERE id=?");
+            if ($stmt) {
+                $stmt->bind_param("ssi", $status, $admin_response, $id);
+                if ($stmt->execute()) {
+                    $_SESSION['flash_success'] = "Status & Tanggapan berhasil disimpan!";
+                } else {
+                    $_SESSION['flash_error'] = "Gagal menyimpan tanggapan.";
+                }
+                $stmt->close();
+            }
+        } else {
+            $_SESSION['flash_error'] = "Data pengaduan atau status tidak valid.";
+        }
+        header("Location: pengaduan.php");
+        exit;
     }
-    header("Location: pengaduan.php");
-    exit;
+
+    // Hapus Laporan (POST + CSRF + cleanup identity_file)
+    if ($action === 'delete') {
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id > 0) {
+            $identity_file = '';
+            $sel = $conn->prepare("SELECT identity_file FROM pengaduan WHERE id = ? LIMIT 1");
+            if ($sel) {
+                $sel->bind_param("i", $id);
+                $sel->execute();
+                $res_sel = $sel->get_result();
+                $row_sel = $res_sel ? $res_sel->fetch_assoc() : null;
+                $identity_file = (string)($row_sel['identity_file'] ?? '');
+                $sel->close();
+            }
+
+            $stmt = $conn->prepare("DELETE FROM pengaduan WHERE id=?");
+            if ($stmt) {
+                $stmt->bind_param("i", $id);
+                if ($stmt->execute()) {
+                    if ($identity_file !== '') {
+                        bapenda_safe_unlink($identity_file, $pengaduan_upload_dir);
+                    }
+                    $_SESSION['flash_success'] = "Laporan berhasil dihapus!";
+                } else {
+                    $_SESSION['flash_error'] = "Gagal menghapus laporan.";
+                }
+                $stmt->close();
+            }
+        }
+        header("Location: pengaduan.php");
+        exit;
+    }
 }
 
 require_once 'layout_header.php';
@@ -54,7 +97,12 @@ if($res){
 <div class="content">
     <?php if (isset($_SESSION['flash_success'])): ?>
     <div class="alert alert-success">
-        <i class="fas fa-check-circle" style="margin-right:8px;"></i> <?php echo $_SESSION['flash_success']; unset($_SESSION['flash_success']); ?>
+        <i class="fas fa-check-circle" style="margin-right:8px;"></i> <?php echo htmlspecialchars($_SESSION['flash_success'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_success']); ?>
+    </div>
+    <?php endif; ?>
+    <?php if (isset($_SESSION['flash_error'])): ?>
+    <div class="alert alert-danger">
+        <i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i> <?php echo htmlspecialchars($_SESSION['flash_error'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_error']); ?>
     </div>
     <?php endif; ?>
 
@@ -97,7 +145,7 @@ if($res){
                                     <?php echo nl2br(htmlspecialchars(substr($p['message'], 0, 100))); ?>...
                                 </p>
                                 <?php if(!empty($p['identity_file'])): ?>
-                                    <a href="../assets/uploads/pengaduan/<?php echo htmlspecialchars($p['identity_file']); ?>" target="_blank" style="display:inline-block; font-size:12px; color:#1d4ed8; background:#eff6ff; padding:4px 8px; border-radius:4px; text-decoration:none;"><i class="fas fa-id-card"></i> Lihat Identitas</a>
+                                    <a href="pengaduan_file.php?id=<?php echo (int)$p['id']; ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block; font-size:12px; color:#1d4ed8; background:#eff6ff; padding:4px 8px; border-radius:4px; text-decoration:none;"><i class="fas fa-id-card"></i> Lihat Identitas</a>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -110,9 +158,14 @@ if($res){
                                 <?php endif; ?>
                             </td>
                                 <td style="text-align:right;">
-                                    <button class="btn-action edit" onclick="openResponseModal(<?php echo $p['id']; ?>, '<?php echo $p['status']; ?>', '<?php echo htmlspecialchars(addslashes($p['admin_response'] ?? '')); ?>')" title="Update & Tanggapi"><i class="<?php echo !empty($p['admin_response']) ? 'fas fa-eye' : 'fas fa-reply'; ?>"></i></button>
-                                    
-                                    <button class="btn-action delete" onclick="if(confirm('Hapus laporan ini permanen?')) window.location.href='pengaduan.php?delete=<?php echo $p['id']; ?>'"><i class="fas fa-trash"></i></button>
+                                    <button type="button" class="btn-action edit" data-id="<?php echo (int)$p['id']; ?>" data-status="<?php echo htmlspecialchars($p['status'], ENT_QUOTES, 'UTF-8'); ?>" data-response="<?php echo htmlspecialchars($p['admin_response'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" onclick="openResponseModalFromBtn(this)" title="Update & Tanggapi"><i class="<?php echo !empty($p['admin_response']) ? 'fas fa-eye' : 'fas fa-reply'; ?>"></i></button>
+
+                                    <form method="POST" action="pengaduan.php" style="display:inline;" onsubmit="return confirm('Hapus laporan ini permanen?');">
+                                        <?php echo csrf_token_field(); ?>
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="id" value="<?php echo (int)$p['id']; ?>">
+                                        <button type="submit" class="btn-action delete" title="Hapus"><i class="fas fa-trash"></i></button>
+                                    </form>
                                 </td>
                         </tr>
                         <?php endforeach; ?>
@@ -133,6 +186,7 @@ if($res){
         <h3 style="margin-top:0; color:var(--text-dark); margin-bottom:20px;"><i class="fas fa-reply" style="color:var(--primary);"></i> Tanggapi & Update Status</h3>
         
         <form method="POST" action="pengaduan.php">
+            <?php echo csrf_token_field(); ?>
             <input type="hidden" name="action" value="update_status">
             <input type="hidden" name="id" id="modal_id" value="">
             
@@ -157,10 +211,10 @@ if($res){
 </div>
 
 <script>
-function openResponseModal(id, currentStatus, currentResponse) {
-    document.getElementById('modal_id').value = id;
-    document.getElementById('modal_status').value = currentStatus;
-    document.getElementById('modal_response').value = currentResponse;
+function openResponseModalFromBtn(btn) {
+    document.getElementById('modal_id').value = btn.dataset.id || '';
+    document.getElementById('modal_status').value = btn.dataset.status || 'pending';
+    document.getElementById('modal_response').value = btn.dataset.response || '';
     document.getElementById('responseModal').style.display = 'flex';
 }
 </script>

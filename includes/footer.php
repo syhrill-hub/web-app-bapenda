@@ -4,18 +4,18 @@
             <div class="footer-grid">
                 <div class="footer-about">
                     <div class="footer-logo">
-                        <img src="<?php echo htmlspecialchars(get_setting('footer_logo_image', get_setting('logo_image', 'assets/img/logo.png', $settings), $settings)); ?>" alt="Bapenda">
+                        <img src="<?php echo htmlspecialchars(bapenda_safe_url(get_setting('footer_logo_image', get_setting('logo_image', 'assets/img/logo.png', $settings), $settings), 'assets/img/logo.png')); ?>" alt="Bapenda">
                         <span>Badan Pendapatan Daerah<br>Kotawaringin Barat</span>
                     </div>
                     <p><?php echo nl2br(htmlspecialchars($footer_desc)); ?></p>
                     <div class="footer-social">
                         <?php 
                         for($i=1; $i<=4; $i++): 
-                            $s_img  = $social_icon_imgs[$i] ?? '';
-                            $s_link = get_setting("social_link_{$i}", '', $settings);
+                            $s_img  = bapenda_safe_url($social_icon_imgs[$i] ?? '', '');
+                            $s_link = bapenda_safe_url(get_setting("social_link_{$i}", '', $settings), '#');
                             if(!empty($s_img) && !empty($s_link) && $s_link !== '#'):
                         ?>
-                        <a href="<?php echo htmlspecialchars($s_link); ?>" target="_blank">
+                        <a href="<?php echo htmlspecialchars($s_link); ?>" target="_blank" rel="noopener noreferrer">
                             <img src="<?php echo htmlspecialchars($s_img); ?>" alt="Sosial Media <?php echo $i; ?>" style="width:20px;height:20px;object-fit:contain;transition:all 0.3s;filter:grayscale(100%) opacity(0.6);" onmouseover="this.style.filter='grayscale(0%) opacity(1)'" onmouseout="this.style.filter='grayscale(100%) opacity(0.6)'">
                         </a>
                         <?php 
@@ -28,7 +28,7 @@
                     <h4>Program Kami</h4>
                     <ul class="footer-links">
                         <?php foreach($services as $s): ?>
-                        <li><a href="<?php echo htmlspecialchars($s['url'] ?? '#'); ?>" target="_blank"><?php echo htmlspecialchars($s['title']); ?></a></li>
+                        <li><a href="<?php echo htmlspecialchars(bapenda_safe_url($s['url'] ?? '#', '#')); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($s['title']); ?></a></li>
                         <?php endforeach; ?>
                     </ul>
                 </div>
@@ -36,7 +36,7 @@
                     <h4>Link Terkait</h4>
                     <ul class="footer-links">
                         <?php foreach($related_links as $l): ?>
-                        <li><a href="<?php echo htmlspecialchars($l['url']); ?>" target="_blank"><?php echo htmlspecialchars($l['title']); ?></a></li>
+                        <li><a href="<?php echo htmlspecialchars(bapenda_safe_url($l['url'] ?? '#', '#')); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($l['title']); ?></a></li>
                         <?php endforeach; ?>
                     </ul>
                 </div>
@@ -103,10 +103,13 @@
         $popup_text_title   = get_setting('popup_text_title', 'Informasi Penting', $settings);
         $popup_text_content = get_setting('popup_text_content', '', $settings);
         $popup_text_icon    = get_setting('popup_text_icon', 'fas fa-bell', $settings);
-        $popup_text_color   = get_setting('popup_text_color', '#0ea5e9', $settings);
+        if (!preg_match('/^[a-zA-Z0-9\s_-]{1,64}$/', (string) $popup_text_icon)) {
+            $popup_text_icon = 'fas fa-bell';
+        }
+        $popup_text_color   = bapenda_safe_css_color(get_setting('popup_text_color', '#0ea5e9', $settings), '#0ea5e9');
         $popup_text_btn     = get_setting('popup_text_btn', 'Saya Mengerti', $settings);
     ?>
-    <?php $pt_img = get_setting('popup_text_image', '', $settings); ?>
+    <?php $pt_img = bapenda_safe_url(get_setting('popup_text_image', '', $settings), ''); ?>
     <div id="textAnnouncementModal" class="modal-overlay" style="z-index:100001;">
         <div class="modal-box" style="max-width:<?php echo !empty($pt_img) ? '600px' : '480px'; ?>; text-align:center; padding:0; overflow:hidden; border-radius:20px;">
             <!-- Header berwarna atau transparan jika ada gambar -->
@@ -182,7 +185,7 @@
     <div id="announcementModal" class="modal-overlay">
         <div class="modal-box" style="max-width:600px; padding:0; overflow:hidden; border-radius:20px; text-align:center;">
             <button class="modal-close" id="closeModal" style="position:absolute; top:12px; right:12px; background:rgba(0,0,0,0.2); border:none; color:#fff; width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; z-index:10; transition:0.3s;" onmouseover="this.style.background='rgba(0,0,0,0.4)'" onmouseout="this.style.background='rgba(0,0,0,0.2)'"><i class="fas fa-times"></i></button>
-            <?php $popup_img = get_setting('popup_image', '', $settings); ?>
+            <?php $popup_img = bapenda_safe_url(get_setting('popup_image', '', $settings), ''); ?>
             <?php if (!empty($popup_img)): ?>
             <div class="modal-img" style="width:100%; position:relative;">
                 <img src="<?php echo htmlspecialchars($popup_img); ?>" alt="Pengumuman Bapenda" style="width:100%; height:auto; display:block;">

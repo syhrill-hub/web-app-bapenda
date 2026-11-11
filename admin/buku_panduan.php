@@ -1,13 +1,10 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
-// Cek autentikasi
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: login.php");
-    exit;
-}
+require_admin_login($conn);
 
 
 $page_title = 'Buku Panduan PDF';

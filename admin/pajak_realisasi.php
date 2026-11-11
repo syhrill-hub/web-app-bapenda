@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -103,7 +104,7 @@ function fmt_rp($n) { return 'Rp ' . number_format($n, 0, ',', '.'); }
             </select>
         </div>
         <button type="submit" class="btn" style="padding:9px 20px;font-size:14px;">Tampilkan</button>
-        <a href="../pajak_dashboard.php?tahun=<?php echo $selected_year; ?>" target="_blank" class="btn-secondary" style="text-decoration:none;padding:9px 16px;font-size:13px;">
+        <a href="../pajak_dashboard.php?tahun=<?php echo $selected_year; ?>" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="text-decoration:none;padding:9px 16px;font-size:13px;">
             <i class="fas fa-external-link-alt" style="margin-right:5px;"></i>Dashboard Publik
         </a>
     </form>

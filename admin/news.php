@@ -1,23 +1,17 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 require_permission('menu_content_news');
 
 /**
- * Safely deletes a local uploaded news image inside assets/ without allowing path traversal.
+ * Safely deletes a local uploaded news image inside assets/uploads/news/ only.
  */
 function delete_news_image_file($image_url) {
-    $rel = ltrim(str_replace('\\', '/', trim((string)$image_url)), '/');
-    if ($rel === '' || strpos($rel, '..') !== false) {
-        return;
-    }
-    $assets_root = realpath(__DIR__ . '/../assets');
-    $candidate = realpath(__DIR__ . '/../' . $rel);
-    if ($assets_root && $candidate && strpos($candidate, $assets_root . DIRECTORY_SEPARATOR) === 0 && is_file($candidate)) {
-        @unlink($candidate);
-    }
+    bapenda_safe_unlink($image_url, __DIR__ . '/../assets/uploads/news', __DIR__ . '/..');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_token'] ?? '')) {
@@ -170,47 +164,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
     $title = trim($_POST['title'] ?? '');
     $snippet = trim($_POST['snippet'] ?? '');
     $content = trim($_POST['content'] ?? '');
-    $image_url = $_POST['existing_image'] ?? '';
-    $redirect_edit = ($_POST['action'] === 'edit' && !empty($_POST['id'])) ? "?edit=" . intval($_POST['id']) : "";
-    
+    $id = intval($_POST['id'] ?? 0);
+    $redirect_edit = ($_POST['action'] === 'edit' && $id > 0) ? "?edit=" . $id : "";
+
+    $existing_db_image = '';
+    if ($_POST['action'] === 'edit' && $id > 0) {
+        $stmt_prev = $conn->prepare("SELECT image_url FROM news WHERE id = ? LIMIT 1");
+        $stmt_prev->bind_param("i", $id);
+        $stmt_prev->execute();
+        $prev_row = $stmt_prev->get_result()->fetch_assoc();
+        $stmt_prev->close();
+        if (!$prev_row) {
+            $_SESSION['flash_error'] = "Berita tidak ditemukan.";
+            header("Location: news.php");
+            exit;
+        }
+        $existing_db_image = (string)($prev_row['image_url'] ?? '');
+    }
+    $image_url = $existing_db_image;
+
     if (empty($title) || empty($snippet) || empty($content)) {
         $_SESSION['flash_error'] = "Semua field wajib diisi.";
         header("Location: news.php" . $redirect_edit);
         exit;
     }
-    
-    if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
-        $max_size = 5 * 1024 * 1024; // 5MB
-        $allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        $allowed_exts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-        $file_type = mime_content_type($_FILES['image_file']['tmp_name']);
-        $ext = strtolower(pathinfo($_FILES['image_file']['name'], PATHINFO_EXTENSION));
 
-        if ($_FILES['image_file']['size'] > $max_size) {
-            $_SESSION['flash_error'] = "Ukuran gambar maksimal 5MB.";
+    if (bapenda_has_uploaded_file($_FILES['image_file'] ?? [])) {
+        $upErr = null;
+        $new_image_url = bapenda_handle_upload(
+            $_FILES['image_file'],
+            __DIR__ . '/../assets/uploads/news',
+            'assets/uploads/news',
+            ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+            5 * 1024 * 1024,
+            'news',
+            $upErr
+        );
+        if ($new_image_url === null) {
+            $_SESSION['flash_error'] = $upErr;
             header("Location: news.php" . $redirect_edit);
             exit;
         }
-
-        if (!in_array($file_type, $allowed_types, true) || !in_array($ext, $allowed_exts, true)) {
-            $_SESSION['flash_error'] = "Format gambar tidak diizinkan! Gunakan JPG, PNG, GIF, atau WebP.";
-            header("Location: news.php" . $redirect_edit);
-            exit;
-        }
-
-        $filename = 'news_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-        $dest = '../assets/uploads/news/' . $filename;
-        
-        if (!is_dir('../assets/uploads/news/')) {
-            mkdir('../assets/uploads/news/', 0755, true);
-        }
-        
-        if (move_uploaded_file($_FILES['image_file']['tmp_name'], $dest)) {
-            if (!empty($_POST['existing_image'])) {
-                delete_news_image_file($_POST['existing_image']);
+        if ($existing_db_image !== '' && $existing_db_image !== $new_image_url) {
+            $stmt_ref = $conn->prepare("SELECT COUNT(*) as c FROM news WHERE image_url = ? AND id != ?");
+            $stmt_ref->bind_param("si", $existing_db_image, $id);
+            $stmt_ref->execute();
+            $ref_count = (int)$stmt_ref->get_result()->fetch_assoc()['c'];
+            $stmt_ref->close();
+            if ($ref_count === 0) {
+                delete_news_image_file($existing_db_image);
             }
-            $image_url = 'assets/uploads/news/' . $filename;
         }
+        $image_url = $new_image_url;
     } elseif ($_POST['action'] === 'add' && $image_url === '') {
         $_SESSION['flash_error'] = "Gambar thumbnail wajib diunggah untuk berita baru.";
         header("Location: news.php");

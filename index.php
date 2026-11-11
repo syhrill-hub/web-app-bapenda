@@ -4,11 +4,11 @@
         <div class="hero-slider">
             <?php foreach ($hero_bgs as $index => $bg): ?>
             <div class="slide <?php echo $index === 0 ? 'active' : ''; ?>">
-                <div class="slide-bg" style="background-image: url('<?php echo htmlspecialchars($bg); ?>');"></div>
+                <div class="slide-bg" style="background-image: url('<?php echo htmlspecialchars(bapenda_safe_css_bg_url($bg, 'assets/img/hero-bg.png')); ?>');"></div>
                 <div class="container">
                     <div class="slide-content">
                         <p class="tagline"><?php echo htmlspecialchars($hero_tagline); ?></p>
-                        <h1><?php echo $hero_title; ?></h1>
+                        <h1><?php echo bapenda_safe_hero_title($hero_title); ?></h1>
                         <p><?php echo htmlspecialchars($hero_desc); ?></p>
                     </div>
                 </div>
@@ -311,7 +311,7 @@ $default_services = [
 $services_to_show = !empty($services) ? $services : $default_services;
 foreach ($services_to_show as $s):
 ?>
-                <a href="<?php echo htmlspecialchars($s['url'] ?? '#'); ?>" class="service-card" target="_blank">
+                <a href="<?php echo htmlspecialchars(bapenda_safe_url($s['url'] ?? '#', '#')); ?>" class="service-card" target="_blank" rel="noopener noreferrer">
                     <div class="service-icon">
                         <?php if (!empty($s['image'])): ?>
                         <img src="<?php echo htmlspecialchars($s['image']); ?>"
@@ -425,7 +425,7 @@ $default_links = [
 $links_to_show = !empty($related_links) ? $related_links : $default_links;
 foreach ($links_to_show as $l):
 ?>
-                <a href="<?php echo htmlspecialchars($l['url']); ?>" class="link-card" target="_blank">
+                <a href="<?php echo htmlspecialchars(bapenda_safe_url($l['url'] ?? '#', '#')); ?>" class="link-card" target="_blank" rel="noopener noreferrer">
                     <img src="<?php echo htmlspecialchars($l['image'] ?? 'assets/img/link-logo.png'); ?>" alt="<?php echo htmlspecialchars($l['title']); ?>">
                     <span><?php echo htmlspecialchars($l['title']); ?></span>
                 </a>
@@ -458,7 +458,7 @@ endforeach; ?>
 else: ?>
                 <?php foreach ($news_items as $n): ?>
                 <div class="news-card">
-                    <div class="news-image" style="background-image: url('<?php echo htmlspecialchars($n['image_url']); ?>');">
+                    <div class="news-image" style="background-image: url('<?php echo htmlspecialchars(bapenda_safe_css_bg_url($n['image_url'], 'assets/img/news-placeholder.jpg')); ?>');">
                         <span class="news-date-badge">
                             <i class="far fa-calendar-alt"></i> <?php echo date('d M Y', strtotime($n['created_at'])); ?>
                         </span>
@@ -501,7 +501,7 @@ endif; ?>
 endif; ?>
                 
                 <?php if (!empty($cta_btn2_text)): ?>
-                <a href="<?php echo htmlspecialchars($cta_btn2_link); ?>" class="btn-secondary" target="_blank">
+                <a href="<?php echo htmlspecialchars(bapenda_safe_url($cta_btn2_link ?? '#', '#')); ?>" class="btn-secondary" target="_blank" rel="noopener noreferrer">
                     <?php if (!empty($cta_btn2_icon)): ?>
                         <img src="<?php echo htmlspecialchars($cta_btn2_icon); ?>" class="btn-icon" alt="">
                     <?php

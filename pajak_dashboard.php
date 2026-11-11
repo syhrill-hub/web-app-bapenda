@@ -21,6 +21,9 @@ $months_array = [
     11 => 'November',
     12 => 'Desember'
 ];
+if ($selected_bulan !== 'all' && (!ctype_digit((string) $selected_bulan) || !isset($months_array[(int) $selected_bulan]))) {
+    $selected_bulan = 'all';
+}
 $bulan_text = ($selected_bulan !== 'all' && isset($months_array[(int) $selected_bulan])) ? ' s/d ' . $months_array[(int) $selected_bulan] : '';
 
 // Get available years dynamically from DB (all years with any data)
@@ -709,7 +712,7 @@ foreach ($multi_years as $yr) {
                 <div class="summary-icon green"><i class="fas fa-chart-line"></i></div>
                 <div>
                     <div class="summary-label">Total Realisasi
-                        <?php echo $selected_bulan === 'all' ? 'YTD' : 's/d ' . $months_array[(int) $selected_bulan]; ?>
+                        <?php echo ($selected_bulan !== 'all' && isset($months_array[(int) $selected_bulan])) ? 's/d ' . $months_array[(int) $selected_bulan] : 'YTD'; ?>
                     </div>
                     <div class="summary-value"><?php echo fmt_rp($total_realisasi); ?></div>
                 </div>
@@ -752,7 +755,7 @@ foreach ($multi_years as $yr) {
                             <th>Nama Jenis Pajak</th>
                             <th class="right">Target (Rp)</th>
                             <th class="right">Realisasi
-                                <?php echo $selected_bulan === 'all' ? 'YTD' : 's/d ' . $months_array[(int) $selected_bulan]; ?>
+                                <?php echo ($selected_bulan !== 'all' && isset($months_array[(int) $selected_bulan])) ? 's/d ' . $months_array[(int) $selected_bulan] : 'YTD'; ?>
                                 (Rp)
                             </th>
                             <th class="right">% Capaian</th>
@@ -922,9 +925,9 @@ foreach ($multi_years as $yr) {
 <script>
     // ── Chart 1: Per-jenis pajak (existing) ────────────────────────────────
     (function () {
-        var labels = <?php echo json_encode($chart_labels); ?>;
-        var targets = <?php echo json_encode($chart_target); ?>;
-        var real = <?php echo json_encode($chart_real); ?>;
+        var labels = <?php echo bapenda_json_encode($chart_labels); ?>;
+        var targets = <?php echo bapenda_json_encode($chart_target); ?>;
+        var real = <?php echo bapenda_json_encode($chart_real); ?>;
 
         var ctx = document.getElementById('pajakChart').getContext('2d');
         new Chart(ctx, {
@@ -981,10 +984,10 @@ foreach ($multi_years as $yr) {
         var el = document.getElementById('trendChart');
         if (!el) return;
 
-        var labels = <?php echo json_encode($my_labels); ?>;
-        var targets = <?php echo json_encode($my_targets); ?>;
-        var real = <?php echo json_encode($my_real); ?>;
-        var pct = <?php echo json_encode($my_pct); ?>;
+        var labels = <?php echo bapenda_json_encode($my_labels); ?>;
+        var targets = <?php echo bapenda_json_encode($my_targets); ?>;
+        var real = <?php echo bapenda_json_encode($my_real); ?>;
+        var pct = <?php echo bapenda_json_encode($my_pct); ?>;
 
         new Chart(el.getContext('2d'), {
             data: {

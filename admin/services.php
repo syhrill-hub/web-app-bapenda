@@ -1,7 +1,10 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
+
 if (!isset($_SESSION['admin_id'])) { header("Location: login.php"); exit; }
 require_permission('menu_content_services');
 
@@ -10,6 +13,8 @@ $cols = $conn->query("SHOW COLUMNS FROM services LIKE 'image'");
 if ($cols && $cols->num_rows === 0) {
     $conn->query("ALTER TABLE services ADD COLUMN image VARCHAR(255) DEFAULT '' AFTER icon");
 }
+
+$uploads_abs_dir = __DIR__ . '/../assets/uploads';
 
 // ── CSRF check ────────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_token'] ?? '')) {
@@ -26,57 +31,124 @@ if (isset($_SESSION['flash_success'])) {
 }
 
 // ── Helper: handle image upload ───────────────────────────────────────────────
-function handle_service_image($file_key) {
-    if (empty($_FILES[$file_key]['name'])) return null;
-    $file = $_FILES[$file_key];
-    $allowed = ['image/jpeg','image/png','image/gif','image/webp','image/svg+xml'];
-    if (!in_array($file['type'], $allowed)) return null;
-    if ($file['size'] > 2 * 1024 * 1024) return null;
-
-    $ext  = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $name = 'svc_' . uniqid() . '.' . $ext;
-    $dest = '../assets/uploads/' . $name;
-    if (move_uploaded_file($file['tmp_name'], $dest)) {
-        return 'assets/uploads/' . $name;
+function handle_service_image($file_key, &$error_msg = null) {
+    if (!bapenda_has_uploaded_file($_FILES[$file_key] ?? [])) {
+        return null;
     }
-    return null;
+    return bapenda_handle_upload(
+        $_FILES[$file_key],
+        __DIR__ . '/../assets/uploads',
+        'assets/uploads',
+        ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        2 * 1024 * 1024,
+        'svc',
+        $error_msg,
+        ['strip_exif' => true]
+    );
+}
+
+// ── Handle Remove Image (run before edit action because button shares edit form) ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_image_action']) && $_POST['remove_image_action'] === '1') {
+    $id = (int)($_POST['svc_id'] ?? 0);
+    if ($id > 0) {
+        $sel = $conn->prepare("SELECT image FROM services WHERE id=?");
+        $sel->bind_param("i", $id);
+        $sel->execute();
+        $row = $sel->get_result()->fetch_assoc();
+        $sel->close();
+        if (!empty($row['image'])) {
+            bapenda_safe_unlink($row['image'], $uploads_abs_dir);
+        }
+        $upd = $conn->prepare("UPDATE services SET image='' WHERE id=?");
+        $upd->bind_param("i", $id);
+        $upd->execute();
+        $upd->close();
+        $_SESSION['flash_success'] = "✅ Gambar icon layanan berhasil dihapus.";
+    }
+    header("Location: services.php?edit=" . $id);
+    exit;
+}
+
+// ── Handle Delete (POST + CSRF) ───────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
+    $id = (int)($_POST['svc_id'] ?? 0);
+    if ($id > 0) {
+        $sel = $conn->prepare("SELECT image FROM services WHERE id=?");
+        $sel->bind_param("i", $id);
+        $sel->execute();
+        $row = $sel->get_result()->fetch_assoc();
+        $sel->close();
+        if (!empty($row['image'])) {
+            bapenda_safe_unlink($row['image'], $uploads_abs_dir);
+        }
+        $stmt = $conn->prepare("DELETE FROM services WHERE id=?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
+        $_SESSION['flash_success'] = "✅ Layanan berhasil dihapus!";
+    }
+    header("Location: services.php");
+    exit;
 }
 
 // ── Handle Add ────────────────────────────────────────────────────────────────
-if (isset($_POST['action']) && $_POST['action'] == 'add') {
-    $title  = trim($_POST['title']);
-    $desc   = trim($_POST['description']);
-    $icon   = trim($_POST['icon'] ?? 'fas fa-concierge-bell');
-    $url    = trim($_POST['url'] ?? '#');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add') {
+    $title  = trim($_POST['title'] ?? '');
+    $desc   = trim($_POST['description'] ?? '');
+    $icon   = preg_replace('/[^a-zA-Z0-9\s_-]/', '', trim($_POST['icon'] ?? 'fas fa-concierge-bell'));
+    if ($icon === '') $icon = 'fas fa-concierge-bell';
+    $url    = bapenda_safe_url(trim($_POST['url'] ?? '#'), '#');
     $order  = (int)($_POST['order_num'] ?? 1);
-    $image  = handle_service_image('svc_image') ?? '';
+
+    $upload_err = null;
+    $image = '';
+    if (bapenda_has_uploaded_file($_FILES['svc_image'] ?? [])) {
+        $uploaded = handle_service_image('svc_image', $upload_err);
+        if ($uploaded === null) {
+            $_SESSION['flash_error'] = $upload_err ?: "Gagal mengunggah gambar layanan.";
+            header("Location: services.php");
+            exit;
+        }
+        $image = $uploaded;
+    }
 
     $stmt = $conn->prepare("INSERT INTO services (title, description, icon, image, url, order_num) VALUES (?, ?, ?, ?, ?, ?)");
     $stmt->bind_param("sssssi", $title, $desc, $icon, $image, $url, $order);
     $stmt->execute();
-    $_SESSION['flash_success'] = "✅ Layanan <strong>" . htmlspecialchars($title) . "</strong> berhasil ditambahkan!";
+    $stmt->close();
+    $_SESSION['flash_success'] = "✅ Layanan \"" . $title . "\" berhasil ditambahkan!";
     header("Location: services.php");
     exit;
 }
 
 // ── Handle Edit (save) ────────────────────────────────────────────────────────
-if (isset($_POST['action']) && $_POST['action'] == 'edit') {
-    $id    = (int)$_POST['svc_id'];
-    $title = trim($_POST['title']);
-    $desc  = trim($_POST['description']);
-    $icon  = trim($_POST['icon'] ?? '');
-    $url   = trim($_POST['url'] ?? '#');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit') {
+    $id    = (int)($_POST['svc_id'] ?? 0);
+    $title = trim($_POST['title'] ?? '');
+    $desc  = trim($_POST['description'] ?? '');
+    $icon  = preg_replace('/[^a-zA-Z0-9\s_-]/', '', trim($_POST['icon'] ?? ''));
+    $url   = bapenda_safe_url(trim($_POST['url'] ?? '#'), '#');
     $order = (int)($_POST['order_num'] ?? 1);
 
-    $new_image = handle_service_image('svc_image');
+    $upload_err = null;
+    $new_image = null;
+    if (bapenda_has_uploaded_file($_FILES['svc_image'] ?? [])) {
+        $new_image = handle_service_image('svc_image', $upload_err);
+        if ($new_image === null) {
+            $_SESSION['flash_error'] = $upload_err ?: "Gagal mengunggah gambar layanan.";
+            header("Location: services.php?edit=" . $id);
+            exit;
+        }
+    }
 
     if ($new_image) {
         $old = $conn->prepare("SELECT image FROM services WHERE id=?");
         $old->bind_param("i", $id);
         $old->execute();
         $old_row = $old->get_result()->fetch_assoc();
-        if (!empty($old_row['image']) && file_exists('../' . $old_row['image'])) {
-            @unlink('../' . $old_row['image']);
+        $old->close();
+        if (!empty($old_row['image'])) {
+            bapenda_safe_unlink($old_row['image'], $uploads_abs_dir);
         }
         $stmt = $conn->prepare("UPDATE services SET title=?, description=?, icon=?, image=?, url=?, order_num=? WHERE id=?");
         $stmt->bind_param("sssssii", $title, $desc, $icon, $new_image, $url, $order, $id);
@@ -85,34 +157,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'edit') {
         $stmt->bind_param("ssssii", $title, $desc, $icon, $url, $order, $id);
     }
     $stmt->execute();
+    $stmt->close();
     $_SESSION['flash_success'] = "✅ Layanan berhasil diperbarui!";
-    header("Location: services.php");
-    exit;
-}
-
-// ── Handle Remove Image ───────────────────────────────────────────────────────
-if (isset($_POST['remove_image_action']) && $_POST['remove_image_action'] == '1') {
-    $id = (int)$_POST['svc_id'];
-    $row = $conn->query("SELECT image FROM services WHERE id=$id")->fetch_assoc();
-    if (!empty($row['image']) && file_exists('../' . $row['image'])) {
-        @unlink('../' . $row['image']);
-    }
-    $conn->query("UPDATE services SET image='' WHERE id=$id");
-    header("Location: services.php?edit=" . $id);
-    exit;
-}
-
-// ── Handle Delete ─────────────────────────────────────────────────────────────
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $row = $conn->query("SELECT image FROM services WHERE id=$id")->fetch_assoc();
-    if (!empty($row['image']) && file_exists('../' . $row['image'])) {
-        @unlink('../' . $row['image']);
-    }
-    $stmt = $conn->prepare("DELETE FROM services WHERE id=?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $_SESSION['flash_success'] = "✅ Layanan berhasil dihapus!";
     header("Location: services.php");
     exit;
 }
@@ -121,8 +167,12 @@ if (isset($_GET['delete'])) {
 $edit_row = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
-    $res = $conn->query("SELECT * FROM services WHERE id=$eid");
+    $stmt = $conn->prepare("SELECT * FROM services WHERE id=?");
+    $stmt->bind_param("i", $eid);
+    $stmt->execute();
+    $res = $stmt->get_result();
     if ($res) $edit_row = $res->fetch_assoc();
+    $stmt->close();
 }
 
 $services = $conn->query("SELECT * FROM services ORDER BY order_num ASC");
@@ -193,11 +243,11 @@ require_once 'layout_header.php';
 </style>
 
 <?php if ($message): ?>
-<div class="alert"><?php echo $message; ?></div>
+<div class="alert"><?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?></div>
 <?php endif; ?>
 
 <?php if (isset($_SESSION['flash_error'])): ?>
-<div class="alert alert-danger"><?php echo $_SESSION['flash_error']; unset($_SESSION['flash_error']); ?></div>
+<div class="alert alert-danger"><?php echo htmlspecialchars($_SESSION['flash_error'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_error']); ?></div>
 <?php endif; ?>
 
 <!-- ── Add / Edit Form ──────────────────────────────────────────────────────── -->
@@ -279,10 +329,10 @@ require_once 'layout_header.php';
                 </div>
                 <?php endif; ?>
                 <label class="upload-zone">
-                    <input type="file" name="svc_image" accept="image/*" onchange="svcPreviewImg(this)">
+                    <input type="file" name="svc_image" accept=".jpg,.jpeg,.png,.gif,.webp" onchange="svcPreviewImg(this)">
                     <i class="fas fa-cloud-upload-alt" style="font-size:30px; color:#94a3b8; margin-bottom:6px; display:block;"></i>
                     <div style="font-weight:600; color:#374151; font-size:13px;">Klik atau drag gambar ke sini</div>
-                    <div class="upload-hint">PNG, JPG, GIF, WebP, SVG · Maks 2MB · Rekomendasi: 80×80px format square</div>
+                    <div class="upload-hint">PNG, JPG, GIF, WebP · Maks 2MB · Rekomendasi: 80×80px format square</div>
                 </label>
                 <div id="svcImgPreviewNew" class="img-preview-new-row">
                     <img id="svcNewImgEl" src="" style="width:52px; height:52px; object-fit:contain; border-radius:10px;">
@@ -298,7 +348,7 @@ require_once 'layout_header.php';
                        oninput="svcUpdateFaPreview(this.value)">
                 <div class="icon-preview-box" id="svcFaPreviewBox">
                     <i class="<?php echo htmlspecialchars($edit_row['icon'] ?? 'fas fa-concierge-bell'); ?>" id="svcFaPreviewIcon"></i>
-                    <span>Preview icon · <a href="https://fontawesome.com/icons" target="_blank" style="color:var(--primary);">Cari kelas Font Awesome</a></span>
+                    <span>Preview icon · <a href="https://fontawesome.com/icons" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Cari kelas Font Awesome</a></span>
                 </div>
             </div>
         </div>
@@ -349,21 +399,26 @@ require_once 'layout_header.php';
                     <p style="font-size:13px; color:#64748b; margin-top:4px; margin-bottom:0;"><?php echo htmlspecialchars($row['description']); ?></p>
                 </td>
                 <td>
-                    <a href="<?php echo htmlspecialchars($row['url']); ?>" target="_blank"
+                    <a href="<?php echo htmlspecialchars(bapenda_safe_url($row['url'], '#'), ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"
                        style="color:var(--primary); text-decoration:none; font-size:13px; word-break:break-all;">
                         <?php echo htmlspecialchars(substr($row['url'], 0, 45)) . (strlen($row['url']) > 45 ? '…' : ''); ?>
                     </a>
                 </td>
                 <td style="text-align:center; font-weight:700;"><?php echo (int)$row['order_num']; ?></td>
                 <td style="text-align:center;">
-                    <a href="?edit=<?php echo $row['id']; ?>" class="btn-action edit">
+                    <a href="?edit=<?php echo (int)$row['id']; ?>" class="btn-action edit">
                         <i class="fas fa-edit"></i> Edit
                     </a>
-                    <a href="?delete=<?php echo $row['id']; ?>" class="btn-danger"
-                       onclick="return confirm('Hapus layanan \'<?php echo addslashes($row['title']); ?>\'?')"
-                       style="font-size:12px; padding:6px 10px;">
-                        <i class="fas fa-trash"></i>
-                    </a>
+                    <form method="POST" action="services.php" style="display:inline;"
+                          onsubmit="return confirm(this.dataset.confirm);"
+                          data-confirm="Hapus layanan '<?php echo htmlspecialchars($row['title'], ENT_QUOTES, 'UTF-8'); ?>'?">
+                        <?php echo csrf_token_field(); ?>
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="svc_id" value="<?php echo (int)$row['id']; ?>">
+                        <button type="submit" class="btn-danger" style="font-size:12px; padding:6px 10px; border:none; cursor:pointer;" title="Hapus">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
                 </td>
             </tr>
             <?php endwhile; ?>

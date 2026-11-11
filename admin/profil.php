@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -49,8 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($new_password !== $confirm_password) {
                             $message = "Password baru dan konfirmasi password tidak cocok.";
                             $message_type = "danger";
-                        } elseif (strlen($new_password) < 6) {
-                            $message = "Password baru minimal 6 karakter.";
+                        } elseif (strlen($new_password) < 8) {
+                            $message = "Password baru minimal 8 karakter.";
                             $message_type = "danger";
                         } else {
                             $hash = password_hash($new_password, PASSWORD_DEFAULT);
@@ -71,6 +72,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $upd_stmt = $conn->prepare("UPDATE users SET username = ?, password_hash = ? WHERE id = ?");
                             $upd_stmt->bind_param("ssi", $new_username, $hash, $admin_id);
                             if ($upd_stmt->execute()) {
+                                if ($update_pass) {
+                                    session_regenerate_id(true);
+                                    rotate_csrf_token();
+                                }
                                 $message = "Profil berhasil diperbarui!" . ($update_pass ? " (Password telah diubah)" : "");
                                 $message_type = "success";
                                 $_SESSION['username'] = $new_username;
@@ -241,7 +246,7 @@ require_once 'layout_header.php';
                         <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Kosongkan jika tidak ingin mengubah password">
                         <button type="button" class="password-toggle" onclick="togglePassword('new_password', this)"><i class="fas fa-eye"></i></button>
                     </div>
-                    <small class="form-text">Bila diisi, minimal harus 6 karakter.</small>
+                    <small class="form-text">Bila diisi, minimal harus 8 karakter.</small>
                 </div>
 
                 <div class="form-group">

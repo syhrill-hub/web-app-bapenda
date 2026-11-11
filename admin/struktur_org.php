@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -9,75 +11,68 @@ if (!isset($_SESSION['admin_id'])) {
 }
 require_permission('menu_content_struktur');
 
-// Auto-create table structure for struktur_org setting (uses existing settings table)
-// No new table needed.
-
 $message = '';
 $message_type = '';
 
-// Handle DELETE (remove image)
-if (isset($_GET['hapus_gambar'])) {
-    if (!verify_csrf_token($_GET['csrf_token'] ?? '')) {
+// Handle POST actions (delete image / upload diagram)
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
         $_SESSION['flash_error'] = "Token keamanan tidak valid.";
-    } else {
-        // Get current image path
+        header("Location: struktur_org.php");
+        exit;
+    }
+
+    if (($_POST['action'] ?? '') === 'delete_image') {
         $stmt = $conn->prepare("SELECT value FROM settings WHERE key_name = 'struktur_org_image'");
         $stmt->execute();
         $res = $stmt->get_result();
         if ($row = $res->fetch_assoc()) {
-            $old_file = '../' . $row['value'];
-            if (file_exists($old_file)) @unlink($old_file);
+            if (!empty($row['value'])) {
+                bapenda_safe_unlink($row['value'], __DIR__ . '/../assets/uploads', __DIR__ . '/..');
+            }
         }
+        $stmt->close();
         safe_settings_update($conn, 'struktur_org_image', '');
         $_SESSION['flash_success'] = "Gambar struktur organisasi berhasil dihapus.";
-    }
-    header("Location: struktur_org.php");
-    exit;
-}
-
-// Handle UPLOAD
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
-        $message = "Token keamanan tidak valid.";
-        $message_type = "error";
-    } else {
-        if (isset($_FILES['diagram']) && $_FILES['diagram']['error'] === UPLOAD_ERR_OK) {
-            $upload_dir = '../assets/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-
-            $ext = strtolower(pathinfo($_FILES['diagram']['name'], PATHINFO_EXTENSION));
-            if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'])) {
-                // Delete old file
-                $stmt = $conn->prepare("SELECT value FROM settings WHERE key_name = 'struktur_org_image'");
-                $stmt->execute();
-                $res = $stmt->get_result();
-                if ($row = $res->fetch_assoc()) {
-                    if (!empty($row['value'])) {
-                        $old_file = '../' . $row['value'];
-                        if (file_exists($old_file)) @unlink($old_file);
-                    }
-                }
-
-                $new_fn = 'struktur_org_' . time() . '.' . $ext;
-                if (move_uploaded_file($_FILES['diagram']['tmp_name'], $upload_dir . $new_fn)) {
-                    $image_url = 'assets/uploads/' . $new_fn;
-                    if (safe_settings_update($conn, 'struktur_org_image', $image_url)) {
-                        $_SESSION['flash_success'] = "Diagram struktur organisasi berhasil diperbarui!";
-                    } else {
-                        $_SESSION['flash_error'] = "Gagal menyimpan ke database.";
-                    }
-                } else {
-                    $_SESSION['flash_error'] = "Gagal memindahkan file. Periksa izin folder uploads.";
-                }
-            } else {
-                $_SESSION['flash_error'] = "Format file tidak valid. Gunakan JPG, PNG, atau WEBP.";
-            }
-        } else {
-            $_SESSION['flash_error'] = "Tidak ada file yang dipilih untuk diunggah.";
-        }
         header("Location: struktur_org.php");
         exit;
     }
+
+    if (bapenda_has_uploaded_file($_FILES['diagram'] ?? [])) {
+        $upErr = null;
+        $image_url = bapenda_handle_upload(
+            $_FILES['diagram'],
+            __DIR__ . '/../assets/uploads',
+            'assets/uploads',
+            ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+            5 * 1024 * 1024,
+            'struktur_org',
+            $upErr
+        );
+        if ($image_url !== null) {
+            $stmt = $conn->prepare("SELECT value FROM settings WHERE key_name = 'struktur_org_image'");
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) {
+                if (!empty($row['value'])) {
+                    bapenda_safe_unlink($row['value'], __DIR__ . '/../assets/uploads', __DIR__ . '/..');
+                }
+            }
+            $stmt->close();
+
+            if (safe_settings_update($conn, 'struktur_org_image', $image_url)) {
+                $_SESSION['flash_success'] = "Diagram struktur organisasi berhasil diperbarui!";
+            } else {
+                $_SESSION['flash_error'] = "Gagal menyimpan ke database.";
+            }
+        } else {
+            $_SESSION['flash_error'] = $upErr;
+        }
+    } else {
+        $_SESSION['flash_error'] = "Tidak ada file yang dipilih untuk diunggah.";
+    }
+    header("Location: struktur_org.php");
+    exit;
 }
 
 // Get current image
@@ -120,7 +115,7 @@ require_once 'layout_header.php';
     </h2>
     <p style="color:#64748b; margin-top:5px;">
         Upload gambar diagram struktur organisasi. Gambar akan ditampilkan secara penuh di halaman publik.
-        <br>URL halaman publik: <a href="../struktur_organisasi.php" target="_blank" style="color:var(--primary); font-weight:600;">struktur_organisasi.php</a>
+        <br>URL halaman publik: <a href="../struktur_organisasi.php" target="_blank" rel="noopener noreferrer" style="color:var(--primary); font-weight:600;">struktur_organisasi.php</a>
     </p>
 </div>
 
@@ -135,12 +130,13 @@ require_once 'layout_header.php';
              style="max-width:100%; max-height:500px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.08); object-fit:contain;">
     </div>
     <div style="text-align:center;">
-        <a href="struktur_org.php?hapus_gambar=1&csrf_token=<?php echo generate_csrf_token(); ?>"
-           class="btn-danger"
-           onclick="return confirm('Hapus gambar struktur organisasi ini?');"
-           style="display:inline-flex; align-items:center; gap:8px;">
-            <i class="fas fa-trash"></i> Hapus Gambar
-        </a>
+        <form method="post" action="struktur_org.php" style="display:inline;" onsubmit="return confirm('Hapus gambar struktur organisasi ini?');">
+            <?php echo csrf_token_field(); ?>
+            <input type="hidden" name="action" value="delete_image">
+            <button type="submit" class="btn-danger" style="display:inline-flex; align-items:center; gap:8px;">
+                <i class="fas fa-trash"></i> Hapus Gambar
+            </button>
+        </form>
     </div>
     <?php else: ?>
     <div style="text-align:center; padding:50px 20px; background:#f8fafc; border-radius:12px; border:2px dashed #e2e8f0; color:#94a3b8;">

@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -15,44 +17,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_tok
     exit;
 }
 
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM gallery WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    if ($stmt->execute()) {
-        $_SESSION['flash_success'] = "Foto berhasil dihapus!";
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id > 0) {
+        $stmtSel = $conn->prepare("SELECT image_url FROM gallery WHERE id = ? LIMIT 1");
+        $stmtSel->bind_param("i", $id);
+        $stmtSel->execute();
+        $rowImg = $stmtSel->get_result()->fetch_assoc();
+        $stmtSel->close();
+
+        $stmt = $conn->prepare("DELETE FROM gallery WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
+            if ($rowImg && !empty($rowImg['image_url'])) {
+                bapenda_safe_unlink($rowImg['image_url'], __DIR__ . '/../assets/uploads', __DIR__ . '/..');
+            }
+            $_SESSION['flash_success'] = "Foto berhasil dihapus!";
+        } else {
+            $_SESSION['flash_error'] = "Foto tidak ditemukan.";
+        }
+        $stmt->close();
     }
     header("Location: gallery.php");
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = $_POST['title'] ?? '';
-    $description = $_POST['description'] ?? '';
-    
-    if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-        $upload_dir = '../assets/uploads/';
-        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-        
-        $file_name = preg_replace('/[^a-zA-Z0-9.\-_]/', '', $_FILES['image']['name']);
-        $ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-        $new_fn = 'gallery_' . time() . '_' . rand(100,999) . '.' . $ext;
-        
-        if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'])) {
-            if (move_uploaded_file($_FILES['image']['tmp_name'], $upload_dir . $new_fn)) {
-                $image_url = 'assets/uploads/' . $new_fn;
-                $stmt = $conn->prepare("INSERT INTO gallery (title, description, image_url) VALUES (?, ?, ?)");
-                $stmt->bind_param("sss", $title, $description, $image_url);
-                if ($stmt->execute()) {
-                    $_SESSION['flash_success'] = "Foto berhasil ditambahkan ke Galeri!";
-                } else {
-                    $_SESSION['flash_error'] = "Gagal menyimpan ke database.";
-                }
+    $title = trim($_POST['title'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+
+    if ($title === '') {
+        $_SESSION['flash_error'] = "Judul foto wajib diisi.";
+    } elseif (bapenda_has_uploaded_file($_FILES['image'] ?? [])) {
+        $upErr = null;
+        $image_url = bapenda_handle_upload(
+            $_FILES['image'],
+            __DIR__ . '/../assets/uploads',
+            'assets/uploads',
+            ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+            5 * 1024 * 1024,
+            'gallery',
+            $upErr
+        );
+        if ($image_url !== null) {
+            $stmt = $conn->prepare("INSERT INTO gallery (title, description, image_url) VALUES (?, ?, ?)");
+            $stmt->bind_param("sss", $title, $description, $image_url);
+            if ($stmt->execute()) {
+                $_SESSION['flash_success'] = "Foto berhasil ditambahkan ke Galeri!";
             } else {
-                $_SESSION['flash_error'] = "Gagal memindahkan file yang diunggah.";
+                bapenda_safe_unlink($image_url, __DIR__ . '/../assets/uploads', __DIR__ . '/..');
+                $_SESSION['flash_error'] = "Gagal menyimpan ke database.";
             }
+            $stmt->close();
         } else {
-            $_SESSION['flash_error'] = "Format file tidak valid. Harus gambar (JPG, PNG, WEBP).";
+            $_SESSION['flash_error'] = $upErr;
         }
     } else {
         $_SESSION['flash_error'] = "Gambar wajib diunggah.";
@@ -73,12 +91,12 @@ require_once 'layout_header.php';
 
 <?php if(isset($_SESSION['flash_success'])): ?>
     <div class="alert" style="background:#d1fae5; color:#065f46; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $_SESSION['flash_success']; unset($_SESSION['flash_success']); ?>
+        <?php echo htmlspecialchars($_SESSION['flash_success'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_success']); ?>
     </div>
 <?php endif; ?>
 <?php if(isset($_SESSION['flash_error'])): ?>
     <div class="alert" style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $_SESSION['flash_error']; unset($_SESSION['flash_error']); ?>
+        <?php echo htmlspecialchars($_SESSION['flash_error'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_error']); ?>
     </div>
 <?php endif; ?>
 
@@ -121,7 +139,12 @@ require_once 'layout_header.php';
             <div style="padding:15px; background: white;">
                 <h4 style="margin:0 0 5px 0; font-size:16px; color:var(--text-dark);"><?php echo htmlspecialchars($item['title']); ?></h4>
                 <p style="margin:0 0 15px 0; font-size:13px; color:#64748b; line-height:1.5;"><?php echo htmlspecialchars($item['description']); ?></p>
-                <a href="gallery.php?delete=<?php echo $item['id']; ?>" class="btn-action delete" onclick="return confirm('Hapus foto ini?');" style="display:inline-block; margin-top:10px;"><i class="fas fa-trash"></i> Hapus</a>
+                <form method="post" action="gallery.php" style="display:inline;" onsubmit="return confirm('Hapus foto ini?');">
+                    <?php echo csrf_token_field(); ?>
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="id" value="<?php echo (int)$item['id']; ?>">
+                    <button type="submit" class="btn-action delete" style="display:inline-block; margin-top:10px;"><i class="fas fa-trash"></i> Hapus</button>
+                </form>
             </div>
         </div>
         <?php endforeach; ?>

@@ -29,7 +29,7 @@ if ($res) {
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px;">
             <?php foreach($items as $item): ?>
             <div style="background: white; border-radius:12px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.08); transition:transform 0.3s ease; cursor:pointer;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
-                <img src="<?php echo htmlspecialchars($item['image_url']); ?>" alt="<?php echo htmlspecialchars($item['title']); ?>" style="width:100%; height:auto; display:block; border-bottom: 1px solid #f1f5f9;">
+                <img src="<?php echo htmlspecialchars(bapenda_safe_url($item['image_url'], ''), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($item['title']); ?>" style="width:100%; height:auto; display:block; border-bottom: 1px solid #f1f5f9;">
                 <div style="padding: 20px; text-align: center;">
                     <h4 style="margin: 0; color: #1e293b; font-size: 16px; font-weight:600;"><?php echo htmlspecialchars($item['title']); ?></h4>
                     <?php if(!empty($item['description'])): ?>

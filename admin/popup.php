@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -22,6 +24,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $res = $conn->query("SELECT * FROM settings");
     while($r = $res->fetch_assoc()) $current_settings[$r['key_name']] = $r['value'];
 
+    $rawIcon = trim((string)($_POST['popup_text_icon'] ?? 'fas fa-bell'));
+    $safeIcon = preg_match('/^[a-zA-Z0-9\s_-]{1,64}$/', $rawIcon) ? $rawIcon : 'fas fa-bell';
+
     $settings = [
         'popup_enabled'       => isset($_POST['popup_enabled']) ? '1' : '0',
         'popup_title'         => $_POST['popup_title'] ?? '',
@@ -29,62 +34,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'popup_text_enabled'  => isset($_POST['popup_text_enabled']) ? '1' : '0',
         'popup_text_title'    => $_POST['popup_text_title'] ?? '',
         'popup_text_content'  => $_POST['popup_text_content'] ?? '',
-        'popup_text_icon'     => $_POST['popup_text_icon'] ?? 'fas fa-bell',
-        'popup_text_color'    => $_POST['popup_text_color'] ?? '#0ea5e9',
+        'popup_text_icon'     => $safeIcon,
+        'popup_text_color'    => bapenda_safe_css_color($_POST['popup_text_color'] ?? '#0ea5e9', '#0ea5e9'),
         'popup_text_btn'      => $_POST['popup_text_btn'] ?? 'Saya Mengerti',
     ];
 
     // Handle Image Upload for Popup
-    if (isset($_FILES['popup_image']) && $_FILES['popup_image']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        $max_size = 2 * 1024 * 1024; // 2MB
-        $file_tmp = $_FILES['popup_image']['tmp_name'];
-        $file_name = $_FILES['popup_image']['name'];
-        $file_size = $_FILES['popup_image']['size'];
-        
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $file_type = finfo_file($finfo, $file_tmp);
-        finfo_close($finfo);
-
-        if (in_array($file_type, $allowed) && $file_size <= $max_size) {
-            $upload_dir = '../assets/img/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-            $new_fn = 'popup_' . time() . '.' . $ext;
-            if (move_uploaded_file($file_tmp, $upload_dir . $new_fn)) {
-                $settings['popup_image'] = 'assets/img/uploads/' . $new_fn;
-            } else {
-                $message = "Gagal mengunggah gambar.";
-            }
+    if (bapenda_has_uploaded_file($_FILES['popup_image'] ?? [])) {
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES['popup_image'],
+            __DIR__ . '/../assets/img/uploads',
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp'],
+            2 * 1024 * 1024,
+            'popup',
+            $upErr
+        );
+        if ($saved !== null) {
+            $settings['popup_image'] = $saved;
         } else {
-            $message = "Gambar tidak valid! Maks: 2MB, Format: JPG/PNG/WEBP.";
+            $message = $upErr;
         }
     }
 
     // Handle Image Upload for Text Popup Logo
-    if (isset($_FILES['popup_text_image']) && $_FILES['popup_text_image']['error'] === UPLOAD_ERR_OK) {
-        $allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        $max_size = 2 * 1024 * 1024; // 2MB
-        $file_tmp = $_FILES['popup_text_image']['tmp_name'];
-        $file_name = $_FILES['popup_text_image']['name'];
-        $file_size = $_FILES['popup_text_image']['size'];
-        
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $file_type = finfo_file($finfo, $file_tmp);
-        finfo_close($finfo);
-
-        if (in_array($file_type, $allowed) && $file_size <= $max_size) {
-            $upload_dir = '../assets/img/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-            $new_fn = 'popup_text_' . time() . '.' . $ext;
-            if (move_uploaded_file($file_tmp, $upload_dir . $new_fn)) {
-                $settings['popup_text_image'] = 'assets/img/uploads/' . $new_fn;
-            } else {
-                $message = "Gagal mengunggah gambar/logo popup teks.";
-            }
+    if (bapenda_has_uploaded_file($_FILES['popup_text_image'] ?? [])) {
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES['popup_text_image'],
+            __DIR__ . '/../assets/img/uploads',
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp'],
+            2 * 1024 * 1024,
+            'popup_text',
+            $upErr
+        );
+        if ($saved !== null) {
+            $settings['popup_text_image'] = $saved;
         } else {
-            $message = "Gambar popup teks tidak valid! Maks: 2MB, Format: JPG/PNG/WEBP.";
+            $message = $upErr;
         }
     }
 
@@ -134,7 +123,7 @@ require_once 'layout_header.php';
 
 <?php if($message): ?>
     <div class="alert" style="background:<?php echo $msg_type === 'error' ? '#fee2e2' : '#d1fae5'; ?>; color:<?php echo $msg_type === 'error' ? '#991b1b' : '#065f46'; ?>; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $message; ?>
+        <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 

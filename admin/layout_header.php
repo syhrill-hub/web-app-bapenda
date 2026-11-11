@@ -136,6 +136,11 @@ $thm_primary_glow = $thm_primary . '4D'; // 30% opacity in hex
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
             background: #fee2e2;
             color: #ef4444;
             padding: 12px;
@@ -224,7 +229,7 @@ $thm_primary_glow = $thm_primary . '4D'; // 30% opacity in hex
         .btn:hover { background: #0284c7; transform: translateY(-3px); box-shadow: 0 15px 35px rgba(14, 165, 233, 0.4); }
         .btn-danger { background: #fee2e2; color: #ef4444; padding: 10px 18px; border-radius: var(--radius-pill); font-size: 13px; text-decoration: none; border: none; cursor: pointer; display:inline-block; font-weight: 600; transition: 0.3s;}
         .btn-danger:hover { background: #ef4444; color: #fff; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);}
-        .btn-action { padding: 8px 12px; border-radius: 6px; display: inline-block; text-decoration: none; transition: 0.3s; font-size: 13px; margin-right: 5px;}
+        .btn-action { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; display: inline-block; text-decoration: none; transition: 0.3s; font-size: 13px; margin-right: 5px; font-family: inherit;}
         .btn-action.edit { background: #dbeafe; color: #1d4ed8; }
         .btn-action.edit:hover { background: #1d4ed8; color: #fff; }
         .btn-action.delete { background: #fee2e2; color: #ef4444; }
@@ -528,9 +533,12 @@ $thm_primary_glow = $thm_primary . '4D'; // 30% opacity in hex
             </a>
         </div>
         <div class="sidebar-footer">
-            <a href="logout" class="btn-logout">
-                <i class="fas fa-sign-out-alt" style="margin-right:8px;"></i> Keluar Panel
-            </a>
+            <form method="post" action="logout.php" style="margin:0;">
+                <?php echo csrf_token_field(); ?>
+                <button type="submit" class="btn-logout">
+                    <i class="fas fa-sign-out-alt" style="margin-right:8px;"></i> Keluar Panel
+                </button>
+            </form>
         </div>
     </div>
     
@@ -543,11 +551,11 @@ $thm_primary_glow = $thm_primary . '4D'; // 30% opacity in hex
                 <button class="admin-hamburger" id="admin-hamburger" aria-label="Toggle Menu">
                     <i class="fas fa-bars"></i>
                 </button>
-                <h1><?php echo $page_title ?? 'Dashboard'; ?></h1>
+                <h1><?php echo htmlspecialchars($page_title ?? 'Dashboard', ENT_QUOTES, 'UTF-8'); ?></h1>
             </div>
             <div class="topbar-right">
                 <span style="color: var(--text-muted); font-size: 14px; font-weight: 500;">Halo, <?php echo htmlspecialchars($_SESSION['full_name'] ?? $_SESSION['username'] ?? 'Admin'); ?></span>
-                <a href="../" target="_blank" class="btn-view-site">
+                <a href="../" target="_blank" rel="noopener noreferrer" class="btn-view-site">
                     <i class="fas fa-external-link-alt" style="margin-right:5px;"></i> Lihat Website
                 </a>
             </div>

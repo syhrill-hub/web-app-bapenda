@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -10,6 +11,9 @@ if (!isset($_SESSION['admin_id'])) {
 require_permission('menu_roles'); // Hak akses spesifik untuk halaman ini
 
 $page_title = 'Manajemen Grup & Hak Akses (Roles)';
+$current_role_id = (int)($_SESSION['admin_role_id'] ?? 0);
+$is_super_admin = ($current_role_id === 1);
+$actor_perms = get_current_effective_permissions();
 
 // Hapus Role (CSRF POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
@@ -24,25 +28,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         $_SESSION['flash_error'] = "ID role tidak valid.";
     } elseif ($id === 1) {
         $_SESSION['flash_error'] = "Role Super Admin tidak boleh dihapus!";
+    } elseif (!$is_super_admin && $id === $current_role_id) {
+        $_SESSION['flash_error'] = "Anda tidak dapat menghapus role yang sedang Anda gunakan sendiri!";
     } else {
-        // Cek apakah ada user yg pakai role ini
-        $stmt_check = $conn->prepare("SELECT COUNT(*) as c FROM users WHERE role_id = ?");
-        $stmt_check->bind_param("i", $id);
-        $stmt_check->execute();
-        $count = (int)$stmt_check->get_result()->fetch_assoc()['c'];
-        $stmt_check->close();
+        $stmt_role = $conn->prepare("SELECT permissions FROM roles WHERE id = ? LIMIT 1");
+        $stmt_role->bind_param("i", $id);
+        $stmt_role->execute();
+        $target_role = $stmt_role->get_result()->fetch_assoc();
+        $stmt_role->close();
 
-        if ($count > 0) {
-            $_SESSION['flash_error'] = "Gagal. Ada $count pengguna menggunakan role ini. Ubah dulu role pengguna tersebut.";
+        if (!$target_role) {
+            $_SESSION['flash_error'] = "Role tidak ditemukan.";
+        } elseif (!$is_super_admin && !actor_can_manage_permissions((string)($target_role['permissions'] ?? ''))) {
+            $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat menghapus role dengan hak akses di luar kewenangan Anda.";
         } else {
-            $stmt = $conn->prepare("DELETE FROM roles WHERE id = ?");
-            $stmt->bind_param("i", $id);
-            if ($stmt->execute()) {
-                $_SESSION['flash_success'] = "Jabatan/Role berhasil dihapus!";
+            // Cek apakah ada user yg pakai role ini
+            $stmt_check = $conn->prepare("SELECT COUNT(*) as c FROM users WHERE role_id = ?");
+            $stmt_check->bind_param("i", $id);
+            $stmt_check->execute();
+            $count = (int)$stmt_check->get_result()->fetch_assoc()['c'];
+            $stmt_check->close();
+
+            if ($count > 0) {
+                $_SESSION['flash_error'] = "Gagal. Ada $count pengguna menggunakan role ini. Ubah dulu role pengguna tersebut.";
             } else {
-                $_SESSION['flash_error'] = "Terjadi kesalahan saat menghapus role.";
+                $stmt = $conn->prepare("DELETE FROM roles WHERE id = ?");
+                $stmt->bind_param("i", $id);
+                if ($stmt->execute()) {
+                    $_SESSION['flash_success'] = "Jabatan/Role berhasil dihapus!";
+                } else {
+                    $_SESSION['flash_error'] = "Terjadi kesalahan saat menghapus role.";
+                }
+                $stmt->close();
             }
-            $stmt->close();
         }
     }
     header("Location: roles.php");
@@ -67,10 +85,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         exit;
     }
 
+    if ($action === 'edit' && !$is_super_admin && $id === $current_role_id) {
+        $_SESSION['flash_error'] = "Anda tidak dapat mengubah pengaturan role yang sedang Anda gunakan sendiri.";
+        header("Location: roles.php");
+        exit;
+    }
+
+    if ($action === 'edit' && $id > 0 && !$is_super_admin) {
+        $stmt_existing = $conn->prepare("SELECT permissions FROM roles WHERE id = ? LIMIT 1");
+        $stmt_existing->bind_param("i", $id);
+        $stmt_existing->execute();
+        $existing_role = $stmt_existing->get_result()->fetch_assoc();
+        $stmt_existing->close();
+
+        if (!$existing_role) {
+            $_SESSION['flash_error'] = "Role tidak ditemukan.";
+            header("Location: roles.php");
+            exit;
+        }
+        if (!actor_can_manage_permissions((string)($existing_role['permissions'] ?? ''))) {
+            $_SESSION['flash_error'] = "Akses ditolak: Role ini memiliki hak akses di luar kewenangan Anda.";
+            header("Location: roles.php");
+            exit;
+        }
+    }
+
     // Filter hanya permission keys yang valid agar tidak ada injeksi key sembarangan
     $valid_keys = array_keys(get_available_permissions());
     $raw_perms = isset($_POST['permissions']) && is_array($_POST['permissions']) ? $_POST['permissions'] : [];
     $perms_array = array_values(array_intersect(array_map('trim', $raw_perms), $valid_keys));
+
+    if (!$is_super_admin && !empty(array_diff($perms_array, $actor_perms))) {
+        $_SESSION['flash_error'] = "Akses ditolak: Anda tidak dapat memberikan hak akses yang tidak Anda miliki.";
+        header("Location: roles.php");
+        exit;
+    }
+
     $permissions_str = implode(',', $perms_array);
 
     if ($name === '') {
@@ -115,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
         $stmt->bind_param("ssi", $name, $permissions_str, $id);
         if ($stmt->execute()) {
             $_SESSION['flash_success'] = "Pengaturan role berhasil diperbarui.";
-            if ($id === (int)($_SESSION['admin_role_id'] ?? 0)) {
+            if ($id === $current_role_id) {
                 $_SESSION['admin_permissions'] = $permissions_str;
             }
         } else {
@@ -166,19 +216,31 @@ $available_permissions = get_available_permissions();
                     </thead>
                     <tbody>
                         <?php foreach ($roles as $r):
+                            $rid = (int)$r['id'];
                             $expanded_perms = expand_permissions((string)($r['permissions'] ?? ''));
+                            $is_role_editable = ($rid !== 1) && ($is_super_admin || ($rid !== $current_role_id && actor_can_manage_permissions((string)($r['permissions'] ?? ''))));
+                            $lock_reason = '';
+                            if ($rid === 1) {
+                                $lock_reason = 'Role ini adalah Super Admin. Hak aksesnya permanen (All-Access) dan tidak bisa dicabut atau dibatasi.';
+                            } elseif ($rid === $current_role_id && !$is_super_admin) {
+                                $lock_reason = 'Anda tidak dapat mengubah pengaturan role yang sedang Anda gunakan sendiri.';
+                            } elseif (!$is_role_editable) {
+                                $lock_reason = 'Role ini memiliki hak akses di atas kewenangan akun Anda sehingga terkunci.';
+                            }
                             $role_payload = [
-                                'id' => (int)$r['id'],
+                                'id' => $rid,
                                 'name' => $r['name'],
                                 'permissions' => (string)($r['permissions'] ?? ''),
                                 'expanded_permissions' => $expanded_perms,
+                                'editable' => $is_role_editable,
+                                'lock_reason' => $lock_reason,
                             ];
-                            $role_json = htmlspecialchars(json_encode($role_payload), ENT_QUOTES, 'UTF-8');
+                            $role_json = htmlspecialchars(bapenda_json_encode($role_payload), ENT_QUOTES, 'UTF-8');
                         ?>
                         <tr>
                             <td><strong><?php echo htmlspecialchars($r['name']); ?></strong></td>
                             <td>
-                                <?php if ((int)$r['id'] === 1): ?>
+                                <?php if ($rid === 1): ?>
                                     <span style="font-size:12px; color:#16a34a; font-weight:700;"><i class="fas fa-shield-alt"></i> Akses Penuh ke Semua Menu</span>
                                 <?php elseif (empty($expanded_perms)): ?>
                                     <span style="color:#94a3b8; font-size:12px; font-style:italic;">Hanya melihat Dashboard</span>
@@ -194,14 +256,14 @@ $available_permissions = get_available_permissions();
                             </td>
                             <td style="text-align:right;">
                                 <button type="button" class="btn-action edit" onclick="openRoleModal('edit', <?php echo $role_json; ?>)">
-                                    <?php if ((int)$r['id'] === 1): ?>
-                                        <i class="fas fa-lock"></i> Detail
-                                    <?php else: ?>
+                                    <?php if ($is_role_editable): ?>
                                         <i class="fas fa-edit"></i> Edit
+                                    <?php else: ?>
+                                        <i class="fas fa-lock"></i> Detail
                                     <?php endif; ?>
                                 </button>
-                                <?php if ((int)$r['id'] !== 1): ?>
-                                <button type="button" class="btn-action delete" onclick="confirmDelete(<?php echo (int)$r['id']; ?>, <?php echo htmlspecialchars(json_encode($r['name']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-trash"></i></button>
+                                <?php if ($is_role_editable): ?>
+                                <button type="button" class="btn-action delete" onclick="confirmDelete(<?php echo $rid; ?>, <?php echo htmlspecialchars(bapenda_json_encode($r['name']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-trash"></i></button>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -246,16 +308,18 @@ $available_permissions = get_available_permissions();
                     </div>
                 </div>
                 <div id="permissionsCheckboxList" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap:12px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                    <?php foreach($available_permissions as $key => $label): ?>
-                    <label style="display:flex; align-items:flex-start; cursor:pointer; font-size:14px; color:#334155; padding: 5px; border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                        <input type="checkbox" name="permissions[]" value="<?php echo htmlspecialchars($key); ?>" class="perm-checkbox" style="margin-top:2px; margin-right:10px; width:16px; height:16px; cursor:pointer;">
+                    <?php foreach($available_permissions as $key => $label):
+                        $can_grant_perm = ($is_super_admin || in_array($key, $actor_perms, true));
+                    ?>
+                    <label style="display:flex; align-items:flex-start; cursor:<?php echo $can_grant_perm ? 'pointer' : 'not-allowed'; ?>; font-size:14px; color:<?php echo $can_grant_perm ? '#334155' : '#94a3b8'; ?>; padding: 5px; border-radius: 4px; transition: background 0.2s;">
+                        <input type="checkbox" name="permissions[]" value="<?php echo htmlspecialchars($key); ?>" data-grantable="<?php echo $can_grant_perm ? '1' : '0'; ?>" class="perm-checkbox" style="margin-top:2px; margin-right:10px; width:16px; height:16px; cursor:<?php echo $can_grant_perm ? 'pointer' : 'not-allowed'; ?>;">
                         <div>
                             <strong><?php echo htmlspecialchars($label); ?></strong>
                         </div>
                     </label>
                     <?php endforeach; ?>
                 </div>
-                <div id="superAdminWarning" style="display:none; color:#ea580c; background:#ffedd5; padding:10px; border-radius:6px; margin-top:15px; font-size:13px; font-weight:600;"><i class="fas fa-lock"></i> Role ini adalah Super Admin. Hak aksesnya permanen (All-Access) dan tidak bisa dicabut atau dibatasi.</div>
+                <div id="superAdminWarning" style="display:none; color:#ea580c; background:#ffedd5; padding:10px; border-radius:6px; margin-top:15px; font-size:13px; font-weight:600;"><i class="fas fa-lock"></i> <span id="superAdminWarningText"></span></div>
             </div>
             
             <div style="text-align:right; margin-top:30px; border-top:1px solid #e2e8f0; padding-top:20px;">
@@ -279,6 +343,7 @@ function openRoleModal(action, data = null) {
     document.getElementById('formAction').value = action;
     const checkboxes = document.querySelectorAll('.perm-checkbox');
     const warning = document.getElementById('superAdminWarning');
+    const warningText = document.getElementById('superAdminWarningText');
     const bulkActions = document.getElementById('permBulkActions');
     const saveBtn = document.getElementById('saveRoleBtn');
     const nameInput = document.getElementById('formName');
@@ -288,16 +353,20 @@ function openRoleModal(action, data = null) {
         document.getElementById('formId').value = '';
         nameInput.value = '';
         nameInput.readOnly = false;
-        checkboxes.forEach(cb => { cb.checked = false; cb.disabled = false; });
+        checkboxes.forEach(cb => {
+            cb.checked = false;
+            cb.disabled = (cb.dataset.grantable !== '1');
+        });
         warning.style.display = 'none';
         bulkActions.style.display = 'flex';
         saveBtn.style.display = 'inline-block';
     } else if (action === 'edit' && data) {
         const isSuperAdmin = Number(data.id) === 1;
-        document.getElementById('modalTitle').innerText = isSuperAdmin ? 'Detail Role Super Admin (Terkunci)' : 'Edit Wewenang Akses';
+        const isEditable = Boolean(data.editable) && !isSuperAdmin;
+        document.getElementById('modalTitle').innerText = isEditable ? 'Edit Wewenang Akses' : 'Detail Role (Terkunci)';
         document.getElementById('formId').value = data.id;
         nameInput.value = data.name || '';
-        nameInput.readOnly = isSuperAdmin;
+        nameInput.readOnly = !isEditable;
 
         const currentPerms = Array.isArray(data.expanded_permissions)
             ? data.expanded_permissions
@@ -309,13 +378,14 @@ function openRoleModal(action, data = null) {
                 cb.disabled = true;
             } else {
                 cb.checked = currentPerms.includes(cb.value);
-                cb.disabled = false;
+                cb.disabled = !isEditable || (cb.dataset.grantable !== '1');
             }
         });
 
-        warning.style.display = isSuperAdmin ? 'block' : 'none';
-        bulkActions.style.display = isSuperAdmin ? 'none' : 'flex';
-        saveBtn.style.display = isSuperAdmin ? 'none' : 'inline-block';
+        warningText.textContent = data.lock_reason || '';
+        warning.style.display = !isEditable ? 'block' : 'none';
+        bulkActions.style.display = isEditable ? 'flex' : 'none';
+        saveBtn.style.display = isEditable ? 'inline-block' : 'none';
     }
 
     document.getElementById('roleModal').style.display = 'flex';

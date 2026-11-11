@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -47,68 +49,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'cta_btn2_link' => $_POST['cta_btn2_link'] ?? '',
     ];
 
+    $upload_img_dir = __DIR__ . '/../assets/img/uploads';
+
     // Handle File Upload for Hero Backgrounds
     for ($i = 1; $i <= 3; $i++) {
         $file_key = 'hero_bg_file_' . $i;
         $bg_key = 'hero_bg' . $i;
-        
-        if (isset($_FILES[$file_key]) && $_FILES[$file_key]['error'] === UPLOAD_ERR_OK) {
-            $allowed_types = ['image/jpeg', 'image/png', 'image/webp'];
-            $max_size = 2 * 1024 * 1024; // 2MB
-            $file_tmp = $_FILES[$file_key]['tmp_name'];
-            $file_name = $_FILES[$file_key]['name'];
-            $file_size = $_FILES[$file_key]['size'];
-            $file_type = false;
-            
-            if (function_exists('finfo_open')) {
-                $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                $file_type = finfo_file($finfo, $file_tmp);
-                finfo_close($finfo);
-            } else if (function_exists('mime_content_type')) {
-                $file_type = mime_content_type($file_tmp);
-            }
 
-            if ($file_type && in_array($file_type, $allowed_types) && $file_size <= $max_size) {
-                $upload_dir = '../assets/img/uploads/';
-                if (!is_dir($upload_dir)) {
-                    mkdir($upload_dir, 0755, true);
-                }
-                $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-                $new_filename = 'hero_bg' . $i . '_' . time() . '.' . $ext;
-                if (move_uploaded_file($file_tmp, $upload_dir . $new_filename)) {
-                    $settings[$bg_key] = 'assets/img/uploads/' . $new_filename;
-                } else {
-                    if (empty($message)) $message = "Gagal memindahkan file gambar $i yang diunggah.";
-                }
-            } else {
-                if (empty($message)) $message = "Gambar $i tidak valid! Pastikan ukuran maksimal 2MB dan format JPG/PNG/WEBP.";
+        if (bapenda_has_uploaded_file($_FILES[$file_key] ?? [])) {
+            $upErr = null;
+            $saved = bapenda_handle_upload(
+                $_FILES[$file_key],
+                $upload_img_dir,
+                'assets/img/uploads',
+                ['jpg', 'jpeg', 'png', 'webp'],
+                2 * 1024 * 1024,
+                'hero_bg' . $i,
+                $upErr
+            );
+            if ($saved !== null) {
+                $settings[$bg_key] = $saved;
+            } elseif (empty($message)) {
+                $message = $upErr;
             }
         }
     }
 
     // Handle File Upload for About Image
-    if (isset($_FILES['about_image_file']) && $_FILES['about_image_file']['error'] === UPLOAD_ERR_OK) {
-        $file_tmp = $_FILES['about_image_file']['tmp_name'];
-        $file_name = $_FILES['about_image_file']['name'];
-        $file_size = $_FILES['about_image_file']['size'];
-        $file_type = false;
-        if (function_exists('finfo_open')) {
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $file_type = finfo_file($finfo, $file_tmp);
-            finfo_close($finfo);
-        } else if (function_exists('mime_content_type')) {
-            $file_type = mime_content_type($file_tmp);
-        }
-        if ($file_type && in_array($file_type, ['image/jpeg', 'image/png', 'image/webp']) && $file_size <= 2 * 1024 * 1024) {
-            $upload_dir = '../assets/img/uploads/';
-            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-            $new_filename = 'about_img_' . time() . '.' . $ext;
-            if (move_uploaded_file($file_tmp, $upload_dir . $new_filename)) {
-                $settings['about_image'] = 'assets/img/uploads/' . $new_filename;
-            } else {
-                if(empty($message)) $message = "Gagal mengunggah gambar Tentang Bapenda.";
-            }
+    if (bapenda_has_uploaded_file($_FILES['about_image_file'] ?? [])) {
+        $upErr = null;
+        $saved = bapenda_handle_upload(
+            $_FILES['about_image_file'],
+            $upload_img_dir,
+            'assets/img/uploads',
+            ['jpg', 'jpeg', 'png', 'webp'],
+            2 * 1024 * 1024,
+            'about_img',
+            $upErr
+        );
+        if ($saved !== null) {
+            $settings['about_image'] = $saved;
+        } elseif (empty($message)) {
+            $message = $upErr;
         }
     }
 
@@ -124,32 +106,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     foreach ($icon_upload_fields as $file_key => $setting_key) {
-        if (isset($_FILES[$file_key]) && $_FILES[$file_key]['error'] === UPLOAD_ERR_OK) {
-            $allowed_icon_types = ['image/png', 'image/svg+xml', 'image/jpeg', 'image/webp'];
-            $max_size = 512 * 1024; // 512KB for icons
-            $file_tmp  = $_FILES[$file_key]['tmp_name'];
-            $file_name = $_FILES[$file_key]['name'];
-            $file_size = $_FILES[$file_key]['size'];
-            $file_type = false;
-            if (function_exists('finfo_open')) {
-                $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                $file_type = finfo_file($finfo, $file_tmp);
-                finfo_close($finfo);
-            } elseif (function_exists('mime_content_type')) {
-                $file_type = mime_content_type($file_tmp);
-            }
-            if ($file_type && in_array($file_type, $allowed_icon_types) && $file_size <= $max_size) {
-                $upload_dir = '../assets/img/uploads/';
-                if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-                $ext = pathinfo($file_name, PATHINFO_EXTENSION);
-                $new_filename = $setting_key . '_' . time() . '.' . $ext;
-                if (move_uploaded_file($file_tmp, $upload_dir . $new_filename)) {
-                    $settings[$setting_key] = 'assets/img/uploads/' . $new_filename;
-                } else {
-                    if (empty($message)) $message = "Gagal mengunggah ikon: $setting_key";
-                }
-            } else {
-                if (empty($message)) $message = "File ikon tidak valid ($setting_key). Pastikan format PNG/SVG/JPG/WEBP dan maks 512KB.";
+        if (bapenda_has_uploaded_file($_FILES[$file_key] ?? [])) {
+            $upErr = null;
+            $saved = bapenda_handle_upload(
+                $_FILES[$file_key],
+                $upload_img_dir,
+                'assets/img/uploads',
+                ['png', 'jpg', 'jpeg', 'webp'],
+                512 * 1024,
+                $setting_key,
+                $upErr
+            );
+            if ($saved !== null) {
+                $settings[$setting_key] = $saved;
+            } elseif (empty($message)) {
+                $message = $upErr;
             }
         }
     }
@@ -200,7 +171,7 @@ require_once 'layout_header.php';
 
 <?php if($message): ?>
     <div class="alert" style="background:<?php echo $msg_type === 'error' ? '#fee2e2' : '#d1fae5'; ?>; color:<?php echo $msg_type === 'error' ? '#991b1b' : '#065f46'; ?>; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $message; ?>
+        <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 

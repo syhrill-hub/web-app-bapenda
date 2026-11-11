@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -18,10 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_tok
 $message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw_radius = (string)($_POST['theme_border_radius'] ?? '24');
+    $safe_radius = in_array($raw_radius, ['4', '12', '24'], true) ? $raw_radius : '24';
+
     $settings = [
-        'theme_primary_color' => $_POST['theme_primary_color'] ?? '#0ea5e9',
-        'theme_font_family' => $_POST['theme_font_family'] ?? 'Poppins',
-        'theme_border_radius' => $_POST['theme_border_radius'] ?? '24'
+        'theme_primary_color' => bapenda_safe_css_color($_POST['theme_primary_color'] ?? '#0ea5e9', '#0ea5e9'),
+        'theme_font_family' => bapenda_safe_css_font($_POST['theme_font_family'] ?? 'Poppins', ['Poppins', 'Inter', 'Roboto', 'Montserrat'], 'Poppins'),
+        'theme_border_radius' => $safe_radius,
     ];
 
     foreach ($settings as $key => $val) {
@@ -53,7 +57,7 @@ require_once 'layout_header.php';
 
 <?php if($message): ?>
     <div class="alert" style="background:#d1fae5; color:#065f46; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $message; ?>
+        <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 

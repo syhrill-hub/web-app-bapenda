@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -133,7 +134,7 @@ require_once 'layout_header.php';
             <button type="submit" class="btn">
                 <i class="fas fa-save" style="margin-right:7px;"></i>Simpan Target Tahun <?php echo $selected_year; ?>
             </button>
-            <a href="../pajak_dashboard.php?tahun=<?php echo $selected_year; ?>" target="_blank" class="btn-secondary" style="text-decoration:none;padding:13px 22px;">
+            <a href="../pajak_dashboard.php?tahun=<?php echo $selected_year; ?>" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="text-decoration:none;padding:13px 22px;">
                 <i class="fas fa-external-link-alt" style="margin-right:6px;"></i>Lihat Dashboard Publik
             </a>
         </div>

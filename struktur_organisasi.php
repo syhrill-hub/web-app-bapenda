@@ -179,7 +179,7 @@ require_once 'includes/header.php';
             <div class="zoom-hint">
                 <i class="fas fa-search-plus"></i> Klik gambar untuk memperbesar
             </div>
-            <img src="<?php echo htmlspecialchars($struktur_img); ?>"
+            <img src="<?php echo htmlspecialchars(bapenda_safe_url($struktur_img, ''), ENT_QUOTES, 'UTF-8'); ?>"
                  alt="Struktur Organisasi Bapenda Kotawaringin Barat"
                  class="diagram-img"
                  id="diagram-img"

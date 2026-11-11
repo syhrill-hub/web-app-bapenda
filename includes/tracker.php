@@ -1,8 +1,7 @@
 <?php
 // includes/tracker.php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/security_helpers.php';
+bapenda_start_secure_session();
 
 // Pastikan konfigurasi database sudah diinclude sebelum ini
 // (biasanya di header.php sudah ada require_once 'config.php')
@@ -10,19 +9,15 @@ if (!isset($conn)) {
     return; // Keluar jika tidak ada koneksi DB
 }
 
-// Inisialisasi session ID unik untuk pelacakan jika belum ada
+// Inisialisasi session ID unik kriptografis untuk pelacakan jika belum ada
 if (empty($_SESSION['visitor_session_id'])) {
-    $_SESSION['visitor_session_id'] = uniqid('v_', true);
+    $_SESSION['visitor_session_id'] = 'v_' . bin2hex(random_bytes(16));
 }
 $session_id = $_SESSION['visitor_session_id'];
 
-// Dapatkan IP address
-$ip_address = $_SERVER['REMOTE_ADDR'];
-if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
-    $ip_address = $_SERVER['HTTP_CLIENT_IP'];
-} elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-    $ip_address = $_SERVER['HTTP_X_FORWARDED_FOR'];
-}
+// Dapatkan IP address dari REMOTE_ADDR yang valid (hindari header spoof HTTP_CLIENT_IP / XFF mentah)
+$raw_ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+$ip_address = filter_var($raw_ip, FILTER_VALIDATE_IP) ? $raw_ip : '0.0.0.0';
 
 // Dapatkan URL saat ini
 $page_url = $_SERVER['REQUEST_URI'];

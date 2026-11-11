@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
 
@@ -11,6 +12,28 @@ require_permission('menu_content_agenda');
 
 $page_title = 'Manajemen Agenda Kegiatan';
 
+// Hapus Agenda (CSRF POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = "Token tidak valid.";
+        header("Location: agenda.php");
+        exit;
+    }
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id > 0) {
+        $stmt = $conn->prepare("DELETE FROM agenda WHERE id=?");
+        $stmt->bind_param("i", $id);
+        if ($stmt->execute() && $stmt->affected_rows > 0) {
+            $_SESSION['flash_success'] = "Agenda berhasil dihapus!";
+        } else {
+            $_SESSION['flash_error'] = "Agenda tidak ditemukan.";
+        }
+        $stmt->close();
+    }
+    header("Location: agenda.php");
+    exit;
+}
+
 // Tambah / Edit
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
@@ -19,11 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
     
-    $id = $_POST['id'] ?? '';
-    $title = trim($_POST['title']);
-    $description = trim($_POST['description']);
-    $event_date = $_POST['event_date'];
-    $location = trim($_POST['location']);
+    $id = (int)($_POST['id'] ?? 0);
+    $title = trim($_POST['title'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+    $event_date = $_POST['event_date'] ?? '';
+    $location = trim($_POST['location'] ?? '');
     
     if (empty($title) || empty($event_date)) {
         $_SESSION['flash_error'] = "Semua kolom yang wajib harus diisi!";
@@ -37,9 +60,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($stmt->execute()) {
             $_SESSION['flash_success'] = "Agenda berhasil ditambahkan!";
         } else {
-            $_SESSION['flash_error'] = "Gagal menambah agenda: " . $conn->error;
+            error_log("Agenda insert error: " . $conn->error);
+            $_SESSION['flash_error'] = "Gagal menambah agenda.";
         }
-    } elseif ($_POST['action'] === 'edit' && !empty($id)) {
+    } elseif ($_POST['action'] === 'edit' && $id > 0) {
         $stmt = $conn->prepare("UPDATE agenda SET title=?, description=?, event_date=?, location=? WHERE id=?");
         $stmt->bind_param("ssssi", $title, $description, $event_date, $location, $id);
         if ($stmt->execute()) {
@@ -47,18 +71,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $_SESSION['flash_error'] = "Gagal memperbarui agenda.";
         }
-    }
-    header("Location: agenda.php");
-    exit;
-}
-
-// Hapus Agenda
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $id = $_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM agenda WHERE id=?");
-    $stmt->bind_param("i", $id);
-    if ($stmt->execute()) {
-        $_SESSION['flash_success'] = "Agenda berhasil dihapus!";
     }
     header("Location: agenda.php");
     exit;
@@ -78,12 +90,12 @@ if($res){
 <div class="content">
     <?php if (isset($_SESSION['flash_success'])): ?>
     <div class="alert alert-success">
-        <i class="fas fa-check-circle" style="margin-right:8px;"></i> <?php echo $_SESSION['flash_success']; unset($_SESSION['flash_success']); ?>
+        <i class="fas fa-check-circle" style="margin-right:8px;"></i> <?php echo htmlspecialchars($_SESSION['flash_success'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_success']); ?>
     </div>
     <?php endif; ?>
     <?php if (isset($_SESSION['flash_error'])): ?>
     <div class="alert alert-danger">
-        <i class="fas fa-exclamation-circle" style="margin-right:8px;"></i> <?php echo $_SESSION['flash_error']; unset($_SESSION['flash_error']); ?>
+        <i class="fas fa-exclamation-circle" style="margin-right:8px;"></i> <?php echo htmlspecialchars($_SESSION['flash_error'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_error']); ?>
     </div>
     <?php endif; ?>
 
@@ -122,8 +134,13 @@ if($res){
                                 <p style="margin:5px 0 0; font-size:12px; color:#64748b;"><?php echo htmlspecialchars($a['description']); ?></p>
                             </td>
                             <td style="text-align:right;">
-                                <button class="btn-action edit" onclick="editAgenda(<?php echo htmlspecialchars(json_encode($a)); ?>)"><i class="fas fa-edit"></i></button>
-                                <button class="btn-action delete" onclick="if(confirm('Hapus agenda ini?')) window.location.href='agenda.php?delete=<?php echo $a['id']; ?>'"><i class="fas fa-trash"></i></button>
+                                <button type="button" class="btn-action edit" onclick="editAgenda(<?php echo htmlspecialchars(bapenda_json_encode($a), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-edit"></i></button>
+                                <form method="post" action="agenda.php" style="display:inline;" onsubmit="return confirm('Hapus agenda ini?');">
+                                    <?php echo csrf_token_field(); ?>
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="id" value="<?php echo (int)$a['id']; ?>">
+                                    <button type="submit" class="btn-action delete"><i class="fas fa-trash"></i></button>
+                                </form>
                             </td>
                         </tr>
                         <?php endforeach; ?>

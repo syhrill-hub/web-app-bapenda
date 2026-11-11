@@ -43,7 +43,7 @@ require_once 'includes/header.php';
 <section style="padding: 20px 0 80px 0; min-height: 50vh; background-color: #f8fafc;">
     <div class="container">
         <div style="line-height: 1.8; color: #334155; margin: 0 auto;">
-            <?php echo $page_data['content']; // Render HTML konten bebas dari wewenang Admin ?>
+            <?php echo bapenda_sanitize_html($page_data['content']); ?>
         </div>
     </div>
 </section>

@@ -1,7 +1,10 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
+
 if (!isset($_SESSION['admin_id'])) { header("Location: login.php"); exit; }
 require_permission('menu_settings_links');
 
@@ -11,14 +14,14 @@ if ($cols && $cols->num_rows === 0) {
     $conn->query("ALTER TABLE links ADD COLUMN image VARCHAR(255) DEFAULT '' AFTER icon_class");
 }
 
+$uploads_abs_dir = __DIR__ . '/../assets/uploads';
+
 // ── CSRF check ────────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_token'] ?? '')) {
     $_SESSION['flash_error'] = "Token keamanan tidak valid. Silakan coba lagi.";
     header("Location: links.php");
     exit;
 }
-
-$msg_type = 'success';
 
 // Message handler for session flash messages
 $message = '';
@@ -28,57 +31,122 @@ if (isset($_SESSION['flash_success'])) {
 }
 
 // ── Helper: handle image upload ───────────────────────────────────────────────
-function handle_link_image($file_key) {
-    if (empty($_FILES[$file_key]['name'])) return null;
-    $file = $_FILES[$file_key];
-    $allowed = ['image/jpeg','image/png','image/gif','image/webp','image/svg+xml'];
-    if (!in_array($file['type'], $allowed)) return null;
-    if ($file['size'] > 2 * 1024 * 1024) return null; // 2MB max
-
-    $ext  = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $name = 'link_' . uniqid() . '.' . $ext;
-    $dest = '../assets/uploads/' . $name;
-    if (move_uploaded_file($file['tmp_name'], $dest)) {
-        return 'assets/uploads/' . $name;
+function handle_link_image($file_key, &$error_msg = null) {
+    if (!bapenda_has_uploaded_file($_FILES[$file_key] ?? [])) {
+        return null;
     }
-    return null;
+    return bapenda_handle_upload(
+        $_FILES[$file_key],
+        __DIR__ . '/../assets/uploads',
+        'assets/uploads',
+        ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        2 * 1024 * 1024,
+        'link',
+        $error_msg,
+        ['strip_exif' => true]
+    );
+}
+
+// ── Handle Remove Image (run before edit action because button shares edit form) ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_image_action']) && $_POST['remove_image_action'] === '1') {
+    $id = (int)($_POST['link_id'] ?? 0);
+    if ($id > 0) {
+        $sel = $conn->prepare("SELECT image FROM links WHERE id=?");
+        $sel->bind_param("i", $id);
+        $sel->execute();
+        $row = $sel->get_result()->fetch_assoc();
+        $sel->close();
+        if (!empty($row['image'])) {
+            bapenda_safe_unlink($row['image'], $uploads_abs_dir);
+        }
+        $upd = $conn->prepare("UPDATE links SET image='' WHERE id=?");
+        $upd->bind_param("i", $id);
+        $upd->execute();
+        $upd->close();
+        $_SESSION['flash_success'] = "✅ Gambar tautan berhasil dihapus.";
+    }
+    header("Location: links.php?edit=" . $id);
+    exit;
+}
+
+// ── Handle Delete (POST + CSRF) ───────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
+    $id = (int)($_POST['link_id'] ?? 0);
+    if ($id > 0) {
+        $sel = $conn->prepare("SELECT image FROM links WHERE id=?");
+        $sel->bind_param("i", $id);
+        $sel->execute();
+        $row = $sel->get_result()->fetch_assoc();
+        $sel->close();
+        if (!empty($row['image'])) {
+            bapenda_safe_unlink($row['image'], $uploads_abs_dir);
+        }
+        $stmt = $conn->prepare("DELETE FROM links WHERE id=?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
+        $_SESSION['flash_success'] = "✅ Link berhasil dihapus!";
+    }
+    header("Location: links.php");
+    exit;
 }
 
 // ── Handle Add ────────────────────────────────────────────────────────────────
-if (isset($_POST['action']) && $_POST['action'] == 'add') {
-    $title   = trim($_POST['title']);
-    $url     = trim($_POST['url']);
-    $icon    = trim($_POST['icon_class'] ?? 'fas fa-link');
-    $order   = (int)($_POST['order_num'] ?? 0);
-    $image   = handle_link_image('link_image') ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add') {
+    $title = trim($_POST['title'] ?? '');
+    $url   = bapenda_safe_url(trim($_POST['url'] ?? '#'), '#');
+    $icon  = preg_replace('/[^a-zA-Z0-9\s_-]/', '', trim($_POST['icon_class'] ?? 'fas fa-link'));
+    if ($icon === '') $icon = 'fas fa-link';
+    $order = (int)($_POST['order_num'] ?? 0);
+
+    $upload_err = null;
+    $image = '';
+    if (bapenda_has_uploaded_file($_FILES['link_image'] ?? [])) {
+        $uploaded = handle_link_image('link_image', $upload_err);
+        if ($uploaded === null) {
+            $_SESSION['flash_error'] = $upload_err ?: "Gagal mengunggah gambar tautan.";
+            header("Location: links.php");
+            exit;
+        }
+        $image = $uploaded;
+    }
 
     $stmt = $conn->prepare("INSERT INTO links (title, url, icon_class, image, order_num) VALUES (?, ?, ?, ?, ?)");
     $stmt->bind_param("ssssi", $title, $url, $icon, $image, $order);
     $stmt->execute();
-    $_SESSION['flash_success'] = "✅ Link <strong>" . htmlspecialchars($title) . "</strong> berhasil ditambahkan!";
+    $stmt->close();
+    $_SESSION['flash_success'] = "✅ Link \"" . $title . "\" berhasil ditambahkan!";
     header("Location: links.php");
     exit;
 }
 
 // ── Handle Edit (save) ────────────────────────────────────────────────────────
-if (isset($_POST['action']) && $_POST['action'] == 'edit') {
-    $id    = (int)$_POST['link_id'];
-    $title = trim($_POST['title']);
-    $url   = trim($_POST['url']);
-    $icon  = trim($_POST['icon_class'] ?? '');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit') {
+    $id    = (int)($_POST['link_id'] ?? 0);
+    $title = trim($_POST['title'] ?? '');
+    $url   = bapenda_safe_url(trim($_POST['url'] ?? '#'), '#');
+    $icon  = preg_replace('/[^a-zA-Z0-9\s_-]/', '', trim($_POST['icon_class'] ?? ''));
     $order = (int)($_POST['order_num'] ?? 0);
 
-    // Check if new image uploaded
-    $new_image = handle_link_image('link_image');
+    $upload_err = null;
+    $new_image = null;
+    if (bapenda_has_uploaded_file($_FILES['link_image'] ?? [])) {
+        $new_image = handle_link_image('link_image', $upload_err);
+        if ($new_image === null) {
+            $_SESSION['flash_error'] = $upload_err ?: "Gagal mengunggah gambar tautan.";
+            header("Location: links.php?edit=" . $id);
+            exit;
+        }
+    }
 
     if ($new_image) {
-        // Delete old image
         $old = $conn->prepare("SELECT image FROM links WHERE id=?");
         $old->bind_param("i", $id);
         $old->execute();
         $old_row = $old->get_result()->fetch_assoc();
-        if (!empty($old_row['image']) && file_exists('../' . $old_row['image'])) {
-            @unlink('../' . $old_row['image']);
+        $old->close();
+        if (!empty($old_row['image'])) {
+            bapenda_safe_unlink($old_row['image'], $uploads_abs_dir);
         }
         $stmt = $conn->prepare("UPDATE links SET title=?, url=?, icon_class=?, image=?, order_num=? WHERE id=?");
         $stmt->bind_param("ssssii", $title, $url, $icon, $new_image, $order, $id);
@@ -87,34 +155,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'edit') {
         $stmt->bind_param("sssii", $title, $url, $icon, $order, $id);
     }
     $stmt->execute();
+    $stmt->close();
     $_SESSION['flash_success'] = "✅ Link berhasil diperbarui!";
-    header("Location: links.php");
-    exit;
-}
-
-// ── Handle Remove Image ───────────────────────────────────────────────────────
-if (isset($_POST['remove_image_action']) && $_POST['remove_image_action'] == '1') {
-    $id = (int)$_POST['link_id'];
-    $row = $conn->query("SELECT image FROM links WHERE id=$id")->fetch_assoc();
-    if (!empty($row['image']) && file_exists('../' . $row['image'])) {
-        @unlink('../' . $row['image']);
-    }
-    $conn->query("UPDATE links SET image='' WHERE id=$id");
-    header("Location: links.php?edit=" . $id);
-    exit;
-}
-
-// ── Handle Delete ─────────────────────────────────────────────────────────────
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $row = $conn->query("SELECT image FROM links WHERE id=$id")->fetch_assoc();
-    if (!empty($row['image']) && file_exists('../' . $row['image'])) {
-        @unlink('../' . $row['image']);
-    }
-    $stmt = $conn->prepare("DELETE FROM links WHERE id=?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $_SESSION['flash_success'] = "✅ Link berhasil dihapus!";
     header("Location: links.php");
     exit;
 }
@@ -123,8 +165,12 @@ if (isset($_GET['delete'])) {
 $edit_row = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
-    $res = $conn->query("SELECT * FROM links WHERE id=$eid");
+    $stmt = $conn->prepare("SELECT * FROM links WHERE id=?");
+    $stmt->bind_param("i", $eid);
+    $stmt->execute();
+    $res = $stmt->get_result();
     if ($res) $edit_row = $res->fetch_assoc();
+    $stmt->close();
 }
 
 $links = $conn->query("SELECT * FROM links ORDER BY order_num ASC");
@@ -199,11 +245,11 @@ require_once 'layout_header.php';
 </style>
 
 <?php if ($message): ?>
-<div class="alert"><?php echo $message; ?></div>
+<div class="alert"><?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?></div>
 <?php endif; ?>
 
 <?php if (isset($_SESSION['flash_error'])): ?>
-<div class="alert alert-danger"><?php echo $_SESSION['flash_error']; unset($_SESSION['flash_error']); ?></div>
+<div class="alert alert-danger"><?php echo htmlspecialchars($_SESSION['flash_error'], ENT_QUOTES, 'UTF-8'); unset($_SESSION['flash_error']); ?></div>
 <?php endif; ?>
 
 <!-- ── Add / Edit Form ───────────────────────────────────────────────────── -->
@@ -287,10 +333,10 @@ require_once 'layout_header.php';
                 </div>
                 <?php endif; ?>
                 <label class="upload-zone">
-                    <input type="file" name="link_image" accept="image/*" onchange="previewLinkImg(this)">
+                    <input type="file" name="link_image" accept=".jpg,.jpeg,.png,.gif,.webp" onchange="previewLinkImg(this)">
                     <i class="fas fa-cloud-upload-alt" style="font-size:28px; color:#94a3b8; margin-bottom:6px;"></i>
                     <div style="font-weight:600; color:#374151; font-size:13px;">Klik atau drag gambar ke sini</div>
-                    <div class="upload-hint">PNG, JPG, GIF, WebP, SVG · Maks 2MB · Rekomendasi: 60×60px atau format square</div>
+                    <div class="upload-hint">PNG, JPG, GIF, WebP · Maks 2MB · Rekomendasi: 60×60px atau format square</div>
                 </label>
                 <div id="imgPreviewNew" style="display:none; margin-top:10px; display:flex; align-items:center; gap:10px; padding:10px; background:#f0fdf4; border-radius:10px; border:1px solid #bbf7d0;">
                     <img id="newImgPreviewEl" src="" style="width:50px; height:50px; object-fit:contain; border-radius:8px;">
@@ -306,7 +352,7 @@ require_once 'layout_header.php';
                        oninput="updateFaPreview(this.value)">
                 <div class="icon-preview-box" id="faPreviewBox">
                     <i class="<?php echo htmlspecialchars($edit_row['icon_class'] ?? 'fas fa-link'); ?>" id="faPreviewIcon"></i>
-                    <span>Preview icon · <a href="https://fontawesome.com/icons" target="_blank" style="color:var(--primary);">Cari kelas FA</a></span>
+                    <span>Preview icon · <a href="https://fontawesome.com/icons" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Cari kelas FA</a></span>
                 </div>
             </div>
         </div>
@@ -356,21 +402,26 @@ require_once 'layout_header.php';
                 </td>
                 <td><strong><?php echo htmlspecialchars($row['title']); ?></strong></td>
                 <td>
-                    <a href="<?php echo htmlspecialchars($row['url']); ?>" target="_blank"
+                    <a href="<?php echo htmlspecialchars(bapenda_safe_url($row['url'], '#'), ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"
                        style="color:var(--primary); text-decoration:none; font-size:13px; word-break:break-all;">
                         <?php echo htmlspecialchars(substr($row['url'], 0, 50)) . (strlen($row['url']) > 50 ? '…' : ''); ?>
                     </a>
                 </td>
                 <td style="text-align:center;"><?php echo (int)$row['order_num']; ?></td>
                 <td style="text-align:center;">
-                    <a href="?edit=<?php echo $row['id']; ?>" class="btn-action edit">
+                    <a href="?edit=<?php echo (int)$row['id']; ?>" class="btn-action edit">
                         <i class="fas fa-edit"></i> Edit
                     </a>
-                    <a href="?delete=<?php echo $row['id']; ?>" class="btn-danger"
-                       onclick="return confirm('Hapus tautan \'<?php echo addslashes($row['title']); ?>\'?')"
-                       style="font-size:12px; padding:6px 10px;">
-                        <i class="fas fa-trash"></i>
-                    </a>
+                    <form method="POST" action="links.php" style="display:inline;"
+                          onsubmit="return confirm(this.dataset.confirm);"
+                          data-confirm="Hapus tautan '<?php echo htmlspecialchars($row['title'], ENT_QUOTES, 'UTF-8'); ?>'?">
+                        <?php echo csrf_token_field(); ?>
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="link_id" value="<?php echo (int)$row['id']; ?>">
+                        <button type="submit" class="btn-danger" style="font-size:12px; padding:6px 10px; border:none; cursor:pointer;" title="Hapus">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
                 </td>
             </tr>
             <?php endwhile; ?>

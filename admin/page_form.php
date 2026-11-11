@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/security_helpers.php';
+bapenda_start_secure_session();
 require_once '../config.php';
 require_once 'includes/security.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
 
 if (!isset($_SESSION['admin_id'])) {
     header("Location: login.php");
@@ -62,59 +64,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $slug = $slug . '-' . time();
     }
     
-    // Handle File Uploads
+    // Handle File Uploads via strict allowlist helper
     if (!empty($_FILES['attachments']['name'][0])) {
-        $upload_dir = '../assets/uploads/';
-        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-        
+        $upload_dir = __DIR__ . '/../assets/uploads';
         $img_html = "";
         $doc_html = "";
         $img_count = 0;
-        
-        foreach ($_FILES['attachments']['tmp_name'] as $key => $tmp_name) {
-            if ($_FILES['attachments']['error'][$key] === UPLOAD_ERR_OK) {
-                $file_name = preg_replace('/[^a-zA-Z0-9.\-_]/', '', $_FILES['attachments']['name'][$key]);
-                $ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-                $new_fn = time() . '_' . rand(100,999) . '.' . $ext;
-                
-                if (move_uploaded_file($tmp_name, $upload_dir . $new_fn)) {
-                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'])) {
-                        $img_html .= "<div style=\"background: white; border-radius:12px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.08); transition:transform 0.3s ease; cursor:pointer;\" onmouseover=\"this.style.transform='translateY(-5px)'\" onmouseout=\"this.style.transform='translateY(0)'\">\n    <img src=\"assets/uploads/$new_fn\" alt=\"Galeri\" style=\"width:100%; height:auto; display:block; border-bottom: 1px solid #f1f5f9;\">\n    <div style=\"padding: 20px; text-align: center;\">\n        <h4 style=\"margin: 0; color: #334155; font-size: 16px;\">Ketik Judul Foto Di Sini</h4>\n        <p style=\"margin: 5px 0 0 0; color: #64748b; font-size: 13px;\">Tulis teks keterangan atau biarkan kosong...</p>\n    </div>\n</div>\n";
-                        $img_count++;
-                    } elseif (in_array($ext, ['pdf', 'doc', 'docx', 'xls', 'xlsx'])) {
-                        $doc_html .= "<a href=\"assets/uploads/$new_fn\" target=\"_blank\" style=\"display:inline-flex; align-items:center; gap:10px; padding:12px 20px; background:var(--bg-light); color:var(--text-dark); border-radius:var(--radius-md); text-decoration:none; margin:10px 10px 10px 0; border:1px solid #e2e8f0;\"><i class=\"fas fa-file-alt\" style=\"color:var(--primary); font-size:24px;\"></i> <div><strong>Dokumen Tautan</strong><br><span style=\"font-size:12px; color:#64748b;\">Klik untuk Mengunduh / Membaca</span></div></a>\n";
-                    }
-                }
+
+        foreach ($_FILES['attachments']['name'] as $key => $origName) {
+            $singleFile = [
+                'name' => $_FILES['attachments']['name'][$key] ?? '',
+                'type' => $_FILES['attachments']['type'][$key] ?? '',
+                'tmp_name' => $_FILES['attachments']['tmp_name'][$key] ?? '',
+                'error' => $_FILES['attachments']['error'][$key] ?? UPLOAD_ERR_NO_FILE,
+                'size' => $_FILES['attachments']['size'][$key] ?? 0,
+            ];
+            if (!bapenda_has_uploaded_file($singleFile)) {
+                continue;
+            }
+            $upErr = null;
+            $savedPath = bapenda_handle_upload(
+                $singleFile,
+                $upload_dir,
+                'assets/uploads',
+                ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
+                10 * 1024 * 1024,
+                'page',
+                $upErr
+            );
+            if ($savedPath === null) {
+                $error = ($error ?? '') !== '' ? ($error . ' | ' . $upErr) : $upErr;
+                continue;
+            }
+            $safePathEsc = htmlspecialchars($savedPath, ENT_QUOTES, 'UTF-8');
+            $savedExt = strtolower(pathinfo($savedPath, PATHINFO_EXTENSION));
+            if (in_array($savedExt, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
+                $img_html .= "<div style=\"background: white; border-radius:12px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.08);\">\n    <img src=\"{$safePathEsc}\" alt=\"Galeri\" style=\"width:100%; height:auto; display:block; border-bottom: 1px solid #f1f5f9;\">\n    <div style=\"padding: 20px; text-align: center;\">\n        <h4 style=\"margin: 0; color: #334155; font-size: 16px;\">Ketik Judul Foto Di Sini</h4>\n        <p style=\"margin: 5px 0 0 0; color: #64748b; font-size: 13px;\">Tulis teks keterangan atau biarkan kosong...</p>\n    </div>\n</div>\n";
+                $img_count++;
+            } else {
+                $doc_html .= "<a href=\"{$safePathEsc}\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"display:inline-flex; align-items:center; gap:10px; padding:12px 20px; background:#f8fafc; color:#1e293b; border-radius:12px; text-decoration:none; margin:10px 10px 10px 0; border:1px solid #e2e8f0;\"><i class=\"fas fa-file-alt\" style=\"color:#0ea5e9; font-size:24px;\"></i> <div><strong>Dokumen Tautan</strong><br><span style=\"font-size:12px; color:#64748b;\">Klik untuk Mengunduh / Membaca</span></div></a>\n";
             }
         }
-        
+
         if ($img_count > 0) {
-            $content .= "\n\n<!-- Galeri Foto Otomatis -->\n<div style=\"display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; margin-top: 30px;\">\n" . $img_html . "</div>\n";
+            $content .= "\n<div style=\"display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; margin-top: 30px;\">\n" . $img_html . "</div>\n";
         }
         if (!empty($doc_html)) {
-            $content .= "\n\n<!-- Kumpulan Dokumen -->\n<div style=\"margin-top: 20px;\">\n" . $doc_html . "</div>\n";
+            $content .= "\n<div style=\"margin-top: 20px;\">\n" . $doc_html . "</div>\n";
         }
     }
-    
-    if ($id > 0) {
-        $stmt = $conn->prepare("UPDATE pages SET title = ?, slug = ?, content = ? WHERE id = ?");
-        $stmt->bind_param("sssi", $title, $slug, $content, $id);
-        if ($stmt->execute()) {
-            $_SESSION['flash_success'] = "Halaman berhasil diperbarui!";
-            header("Location: pages.php");
-            exit;
+
+    $content = bapenda_sanitize_html($content);
+
+    if (empty($error)) {
+        if ($id > 0) {
+            $stmt = $conn->prepare("UPDATE pages SET title = ?, slug = ?, content = ? WHERE id = ?");
+            $stmt->bind_param("sssi", $title, $slug, $content, $id);
+            if ($stmt->execute()) {
+                $_SESSION['flash_success'] = "Halaman berhasil diperbarui!";
+                header("Location: pages.php");
+                exit;
+            } else {
+                error_log("pages update error: " . $conn->error);
+                $error = "Terjadi kesalahan saat memperbarui halaman.";
+            }
         } else {
-            $error = "Terjadi kesalahan saat memperbarui: " . $conn->error;
-        }
-    } else {
-        $stmt = $conn->prepare("INSERT INTO pages (title, slug, content) VALUES (?, ?, ?)");
-        $stmt->bind_param("sss", $title, $slug, $content);
-        if ($stmt->execute()) {
-            $_SESSION['flash_success'] = "Halaman baru berhasil dibuat!";
-            header("Location: pages.php");
-            exit;
-        } else {
-            $error = "Terjadi kesalahan saat menyimpan: " . $conn->error;
+            $stmt = $conn->prepare("INSERT INTO pages (title, slug, content) VALUES (?, ?, ?)");
+            $stmt->bind_param("sss", $title, $slug, $content);
+            if ($stmt->execute()) {
+                $_SESSION['flash_success'] = "Halaman baru berhasil dibuat!";
+                header("Location: pages.php");
+                exit;
+            } else {
+                error_log("pages insert error: " . $conn->error);
+                $error = "Terjadi kesalahan saat menyimpan halaman.";
+            }
         }
     }
 }
@@ -125,13 +149,13 @@ require_once 'layout_header.php';
 
 <?php if(isset($error)): ?>
     <div class="alert" style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:12px; margin-bottom:20px;">
-        <?php echo $error; ?>
+        <?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 
 <div class="card">
     <div class="card-header">
-        <h2><?php echo $page_title; ?></h2>
+        <h2><?php echo htmlspecialchars($page_title, ENT_QUOTES, 'UTF-8'); ?></h2>
         <a href="pages.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Kembali</a>
     </div>
     

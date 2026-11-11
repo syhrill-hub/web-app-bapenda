@@ -5,7 +5,7 @@ $q = isset($_GET['q']) ? trim($_GET['q']) : '';
 $results = [];
 
 if (!empty($q)) {
-    $search_term = "%" . $conn->real_escape_string($q) . "%";
+    $search_term = "%" . addcslashes($q, "\\%_") . "%";
 
     // Cari di Berita (news)
     $stmt1 = $conn->prepare("SELECT id, title, left(content, 150) as snippet, 'Berita' as type, 'news_detail.php?id=' as url_prefix FROM news WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC LIMIT 10");
@@ -29,12 +29,12 @@ if (!empty($q)) {
     }
 
     // Cari di Halaman Statis (pages)
-    $stmt3 = $conn->prepare("SELECT id, title, left(content, 150) as snippet, 'Halaman Dasar' as type, 'page.php?id=' as url_prefix FROM pages WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC LIMIT 10");
+    $stmt3 = $conn->prepare("SELECT id, slug, title, left(content, 150) as snippet, 'Halaman Dasar' as type FROM pages WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC LIMIT 10");
     $stmt3->bind_param("ss", $search_term, $search_term);
     $stmt3->execute();
     $res3 = $stmt3->get_result();
     while($row = $res3->fetch_assoc()) {
-        $row['url'] = $row['url_prefix'] . $row['id'];
+        $row['url'] = 'page.php?slug=' . rawurlencode((string)$row['slug']);
         $results[] = $row;
     }
 
@@ -81,7 +81,7 @@ if (!empty($q)) {
                         <span style="background:#f1f5f9; color:#64748b; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;"><?php echo htmlspecialchars($r['type']); ?></span>
                     </div>
                     <p style="margin:0; font-size:14px; color:#4a5568; line-height:1.5;">
-                        <?php echo strip_tags($r['snippet']); ?>...
+                        <?php echo htmlspecialchars(strip_tags((string)$r['snippet']), ENT_QUOTES, 'UTF-8'); ?>...
                     </p>
                 </a>
                 <?php endforeach; ?>
