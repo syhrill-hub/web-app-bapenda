@@ -26,13 +26,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_FILES['identity_file']) && $_FILES['identity_file']['error'] === UPLOAD_ERR_OK) {
             $upload_dir = 'assets/uploads/pengaduan/';
             if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-            
+
+            $max_size = 5 * 1024 * 1024; // 5MB
+            $allowed_exts = ['jpg', 'jpeg', 'png', 'pdf'];
+            $allowed_mimes = ['image/jpeg', 'image/png', 'application/pdf'];
+
             $file_name = preg_replace('/[^a-zA-Z0-9.\-_]/', '', $_FILES['identity_file']['name']);
             $ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-            $identity_file = time() . '_' . rand(100,999) . '.' . $ext;
-            
-            if (!move_uploaded_file($_FILES['identity_file']['tmp_name'], $upload_dir . $identity_file)) {
-                $error_msg = "Gagal mengunggah file identitas.";
+            $mime_type = mime_content_type($_FILES['identity_file']['tmp_name']);
+
+            if ($_FILES['identity_file']['size'] > $max_size) {
+                $error_msg = "Ukuran file identitas maksimal 5MB.";
+            } elseif (!in_array($ext, $allowed_exts, true) || !in_array($mime_type, $allowed_mimes, true)) {
+                $error_msg = "Format file identitas harus JPG, PNG, atau PDF!";
+            } else {
+                $identity_file = time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                if (!move_uploaded_file($_FILES['identity_file']['tmp_name'], $upload_dir . $identity_file)) {
+                    $error_msg = "Gagal mengunggah file identitas.";
+                }
             }
         } else {
             $error_msg = "File identitas wajib diunggah!";

@@ -5,7 +5,10 @@
     RewriteEngine On
     # RewriteBase dikomentari agar otomatis menyesuaikan folder (lokal /web-app-bapenda/ maupun root domain di server)
 
-    # 1. Aturan khusus untuk berita
+    # 1. Blokir eksekusi skrip PHP/eksekusi berbahaya di folder assets/uploads & assets/img
+    RewriteRule ^assets/.*\.(php|phtml|php[0-9]|phar)$ - [F,L,NC]
+
+    # 2. Aturan khusus untuk berita
     RewriteRule ^berita/?$ news_list.php [L,QSA]
     RewriteRule ^berita/detail/([0-9]+)/?$ news_detail.php?id=$1 [L,QSA]
 
