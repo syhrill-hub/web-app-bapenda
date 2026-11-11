@@ -28,11 +28,14 @@ Thumbs.db
 *.log
 cookies.txt
 
-# Deploy scripts (local only)
+# Deploy scripts (local & server secret webhook - jangan di-push ke GitHub!)
 deploy.bat
 push_deploy.bat
 push-deploy.bat
 deploy.sh
+deploy_webhook.php
+_deploy_*.php
+_cek_*.php
 
 # Scratch, debug, and test scripts
 scratch_*.php
