@@ -1,0 +1,41 @@
+# Konfigurasi environment / database terpisah antara lokal dan production
+config.php
+
+# Folder media hasil upload pengguna (agar tidak bentrok dengan data live di server)
+/assets/uploads/*
+/assets/img/uploads/*
+!/assets/uploads/.gitkeep
+!/assets/img/uploads/.gitkeep
+
+# IDE & Editor
+/.vscode/
+/.idea/
+/.fleet/
+*.sublime-project
+*.sublime-workspace
+
+# Backup & Database dumps
+*.sql
+*.tar.gz
+*.zip
+backups/
+
+# OS & Temporary files
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+*.log
+cookies.txt
+
+# Deploy scripts (local only)
+deploy.bat
+push_deploy.bat
+push-deploy.bat
+deploy.sh
+
+# Scratch, debug, and test scripts
+scratch_*.php
+test_*.php
+debug_*.php
+check_*.php
