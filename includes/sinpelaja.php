@@ -101,11 +101,51 @@ function sinpelaja_get_pdo(?array $override = null, ?string &$errorReason = null
         $pdo->exec("SET search_path TO public, pad, pbb, bphtb, retribusi");
         return $pdo;
     } catch (Throwable $e) {
-        // Jangan pernah menyertakan DSN penuh atau kredensial pada pesan diagnostik
-        $sqlState = ($e instanceof PDOException && $e->getCode()) ? (string) $e->getCode() : '';
-        $errorReason = 'Gagal terhubung ke database SINPELAJA' . ($sqlState !== '' ? " (kode: {$sqlState})" : '') . '.';
+        $errorReason = sinpelaja_format_safe_error($e, $cfg);
         return null;
     }
+}
+
+/**
+ * Menyusun pesan error diagnostik yang aman (password selalu disensor) untuk admin.
+ */
+function sinpelaja_format_safe_error(Throwable $e, array $cfg): string
+{
+    $sqlState = ($e instanceof PDOException && $e->getCode()) ? (string) $e->getCode() : '';
+    $raw = $e->getMessage();
+
+    $pwd = (string) ($cfg['password'] ?? '');
+    if ($pwd !== '') {
+        $raw = str_replace($pwd, '***', $raw);
+    }
+    // Hapus prefix SQLSTATE berulang agar ringkas
+    $detail = preg_replace('/^SQLSTATE\[[^\]]+\]\s*(\[\d+\]\s*)?/i', '', trim($raw));
+    $detail = preg_replace('/\s+/', ' ', (string) $detail);
+    if (strlen($detail) > 220) {
+        $detail = substr($detail, 0, 217) . '...';
+    }
+
+    $hint = '';
+    if (stripos($detail, 'does not exist') !== false && stripos($detail, 'database') !== false) {
+        $hint = 'Nama database tidak ditemukan (periksa nilai \'dbname\', mis. itax_kobar vs postgres).';
+    } elseif (stripos($detail, 'password authentication failed') !== false) {
+        $hint = 'Username atau password PostgreSQL ditolak oleh server SINPELAJA.';
+    } elseif (stripos($detail, 'pg_hba.conf') !== false) {
+        $hint = 'IP server website belum diizinkan di pg_hba.conf pada server SINPELAJA.';
+    } elseif (stripos($detail, 'timed out') !== false || stripos($detail, 'timeout expired') !== false) {
+        $hint = 'Koneksi timeout (kemungkinan firewall menutup akses port ke server SINPELAJA).';
+    } elseif (stripos($detail, 'Connection refused') !== false) {
+        $hint = 'Koneksi ditolak oleh host/port tujuan (pastikan port PostgreSQL terbuka & aktif).';
+    }
+
+    $msg = 'Gagal terhubung ke database SINPELAJA' . ($sqlState !== '' ? " (kode: {$sqlState})" : '') . '.';
+    if ($hint !== '') {
+        $msg .= ' ' . $hint;
+    }
+    if ($detail !== '') {
+        $msg .= ' [Detail: ' . $detail . ']';
+    }
+    return $msg;
 }
 
 /**
@@ -113,7 +153,8 @@ function sinpelaja_get_pdo(?array $override = null, ?string &$errorReason = null
  */
 function sinpelaja_test_connection(?array $override = null): array
 {
-    $readiness = sinpelaja_check_readiness($override);
+    $cfg = sinpelaja_get_config($override);
+    $readiness = sinpelaja_check_readiness($cfg);
     if (!$readiness['ready']) {
         return array_merge($readiness, [
             'connected'  => false,
@@ -124,7 +165,7 @@ function sinpelaja_test_connection(?array $override = null): array
 
     $t0 = microtime(true);
     $err = null;
-    $pdo = sinpelaja_get_pdo($override, $err);
+    $pdo = sinpelaja_get_pdo($cfg, $err);
     if (!$pdo) {
         return array_merge($readiness, [
             'connected'  => false,
@@ -135,6 +176,7 @@ function sinpelaja_test_connection(?array $override = null): array
 
     try {
         $pdo->query('SELECT 1')->fetchColumn();
+        $pdo->query('SELECT 1 FROM pad.target_pajak LIMIT 1')->fetchColumn();
         $ms = round((microtime(true) - $t0) * 1000, 1);
         return array_merge($readiness, [
             'connected'  => true,
@@ -145,7 +187,8 @@ function sinpelaja_test_connection(?array $override = null): array
         return array_merge($readiness, [
             'connected'  => false,
             'latency_ms' => null,
-            'message'    => 'Koneksi terbuka namun query uji gagal.',
+            'message'    => 'Terkoneksi ke PostgreSQL, namun tabel SINPELAJA (pad.target_pajak) tidak ditemukan pada database "'
+                . $readiness['dbname'] . '". Periksa nama \'dbname\' di config.php.',
         ]);
     }
 }
