@@ -3,11 +3,22 @@ session_start();
 require_once '../config.php';
 require_once 'includes/security.php';
 
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: login.php");
-    exit;
-}
 require_permission('menu_content_news');
+
+/**
+ * Safely deletes a local uploaded news image inside assets/ without allowing path traversal.
+ */
+function delete_news_image_file($image_url) {
+    $rel = ltrim(str_replace('\\', '/', trim((string)$image_url)), '/');
+    if ($rel === '' || strpos($rel, '..') !== false) {
+        return;
+    }
+    $assets_root = realpath(__DIR__ . '/../assets');
+    $candidate = realpath(__DIR__ . '/../' . $rel);
+    if ($assets_root && $candidate && strpos($candidate, $assets_root . DIRECTORY_SEPARATOR) === 0 && is_file($candidate)) {
+        @unlink($candidate);
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_token'] ?? '')) {
     $_SESSION['flash_error'] = "Token keamanan tidak valid. Silakan coba lagi.";
@@ -15,16 +26,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !verify_csrf_token($_POST['csrf_tok
     exit;
 }
 
-$message = '';
+$message = $_SESSION['flash_success'] ?? '';
 $message_type = 'success';
+unset($_SESSION['flash_success']);
 
-if (isset($_GET['success'])) $message = 'Berita berhasil dipublikasikan!';
-if (isset($_GET['updated'])) $message = 'Berita berhasil diperbarui!';
-if (isset($_GET['deleted'])) { $message = 'Berita berhasil dihapus!'; }
-if (isset($_GET['error'])) { 
-    $message = $_SESSION['flash_error'] ?? 'Terjadi kesalahan.';
+if (!empty($_SESSION['flash_error'])) {
+    $message = $_SESSION['flash_error'];
     $message_type = 'error';
     unset($_SESSION['flash_error']);
+}
+
+if ($message === '') {
+    if (isset($_GET['success'])) $message = 'Berita berhasil dipublikasikan!';
+    if (isset($_GET['updated'])) $message = 'Berita berhasil diperbarui!';
+    if (isset($_GET['deleted'])) $message = 'Berita berhasil dihapus!';
+    if (isset($_GET['error'])) {
+        $message = 'Terjadi kesalahan.';
+        $message_type = 'error';
+    }
 }
 
 $edit_id = isset($_GET['edit']) ? intval($_GET['edit']) : 0;
@@ -42,28 +61,70 @@ if ($edit_id > 0) {
         header("Location: news.php");
         exit;
     }
+    $stmt->close();
 }
 
-if (isset($_GET['delete'])) {
-    $id = intval($_GET['delete']);
-    $stmt = $conn->prepare("SELECT image_url FROM news WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($row = $result->fetch_assoc()) {
-        if (!empty($row['image_url'])) {
-            $file_path = '../' . $row['image_url'];
-            if (file_exists($file_path)) @unlink($file_path);
+// Proses Hapus Semua Berita (CSRF POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_all') {
+    $image_paths = [];
+    $res_imgs = $conn->query("SELECT DISTINCT image_url FROM news WHERE image_url IS NOT NULL AND image_url != ''");
+    if ($res_imgs) {
+        while ($img_row = $res_imgs->fetch_assoc()) {
+            $image_paths[] = $img_row['image_url'];
         }
     }
-    $stmt = $conn->prepare("DELETE FROM news WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    header("Location: news.php?deleted=1");
+
+    if ($conn->query("DELETE FROM news")) {
+        $deleted_count = (int)$conn->affected_rows;
+        foreach ($image_paths as $img_path) {
+            delete_news_image_file($img_path);
+        }
+        $_SESSION['flash_success'] = $deleted_count > 0
+            ? "Semua berita ($deleted_count berita) berhasil dihapus permanen."
+            : "Tidak ada berita untuk dihapus.";
+    } else {
+        $_SESSION['flash_error'] = "Gagal menghapus semua berita.";
+    }
+    header("Location: news.php");
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+// Proses Hapus Satu Berita (CSRF POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    $id = intval($_POST['id'] ?? 0);
+    if ($id > 0) {
+        $stmt = $conn->prepare("SELECT image_url FROM news WHERE id = ? LIMIT 1");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $stmt_del = $conn->prepare("DELETE FROM news WHERE id = ?");
+        $stmt_del->bind_param("i", $id);
+        if ($stmt_del->execute() && $stmt_del->affected_rows > 0) {
+            if ($row && !empty($row['image_url'])) {
+                $stmt_ref = $conn->prepare("SELECT COUNT(*) as c FROM news WHERE image_url = ?");
+                $stmt_ref->bind_param("s", $row['image_url']);
+                $stmt_ref->execute();
+                $ref_count = (int)$stmt_ref->get_result()->fetch_assoc()['c'];
+                $stmt_ref->close();
+                if ($ref_count === 0) {
+                    delete_news_image_file($row['image_url']);
+                }
+            }
+            $_SESSION['flash_success'] = "Berita berhasil dihapus!";
+        } else {
+            $_SESSION['flash_error'] = "Berita tidak ditemukan atau gagal dihapus.";
+        }
+        $stmt_del->close();
+    } else {
+        $_SESSION['flash_error'] = "ID berita tidak valid.";
+    }
+    header("Location: news.php");
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['add', 'edit'], true)) {
     $title = trim($_POST['title'] ?? '');
     $snippet = trim($_POST['snippet'] ?? '');
     $content = trim($_POST['content'] ?? '');
@@ -89,8 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             if (move_uploaded_file($_FILES['image_file']['tmp_name'], $dest)) {
-                if (!empty($_POST['existing_image']) && file_exists('../' . $_POST['existing_image'])) {
-                    @unlink('../' . $_POST['existing_image']);
+                if (!empty($_POST['existing_image'])) {
+                    delete_news_image_file($_POST['existing_image']);
                 }
                 $image_url = 'assets/uploads/news/' . $filename;
             }
@@ -116,6 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 $news_list = $conn->query("SELECT * FROM news ORDER BY created_at DESC");
+$total_news = $news_list ? (int)$news_list->num_rows : 0;
 
 $page_title = $edit_id > 0 ? 'Edit Berita' : 'Kelola Berita';
 require_once 'layout_header.php';
@@ -184,8 +246,15 @@ require_once 'layout_header.php';
 </div>
 
 <div class="card" style="margin-top: 30px;">
-    <div class="card-header">
-        <h2>Daftar Berita</h2>
+    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <h2>Daftar Berita (<?php echo $total_news; ?>)</h2>
+        <?php if ($total_news > 0): ?>
+        <form method="post" action="news.php" style="margin:0;" onsubmit="return confirm('PERINGATAN: Anda yakin ingin menghapus SEMUA <?php echo $total_news; ?> berita beserta gambarnya secara permanen? Tindakan ini tidak dapat dibatalkan!');">
+            <input type="hidden" name="action" value="delete_all">
+            <?php echo csrf_token_field(); ?>
+            <button type="submit" class="btn-danger"><i class="fas fa-trash-alt"></i> Hapus Semua Berita</button>
+        </form>
+        <?php endif; ?>
     </div>
     <div style="overflow-x: auto;">
         <table>
@@ -194,27 +263,27 @@ require_once 'layout_header.php';
                 <th>Judul &amp; Ringkasan Berita</th>
                 <th width="140" style="text-align:center;">Aksi</th>
             </tr>
-            <?php while($row = $news_list->fetch_assoc()): ?>
+            <?php if ($news_list): while($row = $news_list->fetch_assoc()): ?>
             <tr>
                 <td>
                     <?php if(!empty($row['image_url'])): ?>
-                        <img src="../<?php echo htmlspecialchars($row['image_url']); ?>" class="preview" style="width:120px; height:80px; object-fit:cover; border-radius:6px;">
+                        <img src="../<?php echo htmlspecialchars((string)$row['image_url']); ?>" class="preview" style="width:120px; height:80px; object-fit:cover; border-radius:6px;">
                     <?php else: ?>
                         <div style="width:120px;height:80px;background:#eee;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px;">No Image</div>
                     <?php endif; ?>
                 </td>
                 <td>
-                    <strong style="color: var(--primary); font-size:16px;"><?php echo htmlspecialchars($row['title']); ?></strong><br>
-                    <small style="color:var(--text-muted);">Diunggah pada: <?php echo date('d M Y, H:i', strtotime($row['created_at'])); ?></small><br>
-                    <p style="font-size: 13px; color:#555; margin-top:8px; line-height: 1.5;"><?php echo htmlspecialchars($row['snippet']); ?></p>
+                    <strong style="color: var(--primary); font-size:16px;"><?php echo htmlspecialchars((string)($row['title'] ?? '')); ?></strong><br>
+                    <small style="color:var(--text-muted);">Diunggah pada: <?php echo !empty($row['created_at']) ? date('d M Y, H:i', strtotime($row['created_at'])) : '-'; ?></small><br>
+                    <p style="font-size: 13px; color:#555; margin-top:8px; line-height: 1.5;"><?php echo htmlspecialchars((string)($row['snippet'] ?? '')); ?></p>
                 </td>
                 <td style="text-align:center;">
-                    <a href="?edit=<?php echo $row['id']; ?>" class="btn-action edit" title="Edit" style="background:#dbeafe; color:#1d4ed8; padding:8px 12px; border-radius:6px; margin-bottom:5px; display:inline-block; text-decoration:none;"><i class="fas fa-edit"></i></a>
-                    <a href="?delete=<?php echo $row['id']; ?>" class="btn-danger" onclick="return confirm('Anda yakin ingin menghapus berita ini secara permanen?');"><i class="fas fa-trash"></i> Hapus</a>
+                    <a href="?edit=<?php echo (int)$row['id']; ?>" class="btn-action edit" title="Edit" style="background:#dbeafe; color:#1d4ed8; padding:8px 12px; border-radius:6px; margin-bottom:5px; display:inline-block; text-decoration:none;"><i class="fas fa-edit"></i></a>
+                    <button type="button" class="btn-danger" onclick="confirmDeleteNews(<?php echo (int)$row['id']; ?>)"><i class="fas fa-trash"></i> Hapus</button>
                 </td>
             </tr>
-            <?php endwhile; ?>
-            <?php if($news_list->num_rows === 0): ?>
+            <?php endwhile; endif; ?>
+            <?php if($total_news === 0): ?>
             <tr>
                 <td colspan="3" style="text-align:center; color:#64748b; padding:30px;">Belum ada berita yang dipublikasikan.</td>
             </tr>
@@ -223,7 +292,21 @@ require_once 'layout_header.php';
     </div>
 </div>
 
+<!-- Form Hapus Satu Berita (CSRF POST) -->
+<form id="deleteNewsForm" method="post" action="news.php" style="display:none;">
+    <input type="hidden" name="action" value="delete">
+    <input type="hidden" name="id" id="deleteNewsId" value="">
+    <?php echo csrf_token_field(); ?>
+</form>
+
 <script>
+function confirmDeleteNews(id) {
+    if (confirm('Anda yakin ingin menghapus berita ini secara permanen?')) {
+        document.getElementById('deleteNewsId').value = id;
+        document.getElementById('deleteNewsForm').submit();
+    }
+}
+
 function previewImage(input) {
     const file = input.files[0];
     if (!file) return;
