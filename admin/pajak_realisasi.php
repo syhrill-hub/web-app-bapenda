@@ -2,7 +2,6 @@
 session_start();
 require_once '../config.php';
 require_once 'includes/security.php';
-require_once '../includes/sinpelaja.php';
 
 if (!isset($_SESSION['admin_id'])) { header("Location: login.php"); exit; }
 require_permission('menu_tax_realisasi');
@@ -82,8 +81,6 @@ function fmt_rp($n) { return 'Rp ' . number_format($n, 0, ',', '.'); }
     <?php echo htmlspecialchars($flash_msg); ?>
 </div>
 <?php endif; ?>
-
-<?php echo sinpelaja_admin_status_banner(); ?>
 
 <!-- Filter -->
 <div class="card" style="margin-bottom:24px;padding:20px 28px;">

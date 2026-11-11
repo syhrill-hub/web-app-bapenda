@@ -563,39 +563,3 @@ function sinpelaja_fetch_dashboard_bundle(PDO $pdo, int $requestedYear, $bulan =
     ];
 }
 
-/**
- * Merender HTML banner status integrasi SINPELAJA untuk panel admin
- * (Target Pajak & Realisasi Pajak). Tidak menampilkan password/kredensial.
- */
-function sinpelaja_admin_status_banner(?array $override = null): string
-{
-    $st = sinpelaja_test_connection($override);
-    if ($st['connected']) {
-        $bg = '#ecfdf5';
-        $bd = '#a7f3d0';
-        $fg = '#065f46';
-        $icon = 'fa-check-circle';
-        $title = 'Integrasi Realtime SINPELAJA Aktif';
-        $desc = sprintf(
-            'Terhubung ke PostgreSQL %s (%s:%d, latensi %s ms). Dashboard pajak publik otomatis menampilkan data realtime SINPELAJA; data di halaman ini berfungsi sebagai cadangan (fallback) otomatis.',
-            htmlspecialchars($st['dbname'], ENT_QUOTES, 'UTF-8'),
-            htmlspecialchars($st['host'], ENT_QUOTES, 'UTF-8'),
-            (int) $st['port'],
-            htmlspecialchars((string) $st['latency_ms'], ENT_QUOTES, 'UTF-8')
-        );
-    } else {
-        $bg = '#fffbeb';
-        $bd = '#fde68a';
-        $fg = '#92400e';
-        $icon = 'fa-exclamation-triangle';
-        $title = 'Integrasi SINPELAJA Tidak Aktif (Mode Portal Lokal)';
-        $desc = htmlspecialchars($st['message'], ENT_QUOTES, 'UTF-8')
-            . ' Dashboard publik saat ini menampilkan data MySQL lokal dari halaman ini. Periksa ekstensi <code>pdo_pgsql</code> &amp; <code>$sinpelaja_config</code> di <code>config.php</code>.';
-    }
-
-    return '<div style="margin-bottom:20px;padding:14px 18px;border-radius:12px;background:' . $bg . ';border:1px solid ' . $bd . ';color:' . $fg . ';display:flex;align-items:flex-start;gap:12px;font-size:13.5px;line-height:1.5;">'
-        . '<i class="fas ' . $icon . '" style="font-size:18px;margin-top:2px;flex-shrink:0;"></i>'
-        . '<div><strong style="display:block;margin-bottom:2px;">' . $title . '</strong>' . $desc . '</div>'
-        . '</div>';
-}
-
