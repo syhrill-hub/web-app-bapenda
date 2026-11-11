@@ -18,3 +18,4 @@ if ($conn->connect_error) {
 // Select database, suppress error if it doesn't exist yet (useful during setup)
 @$conn->select_db($dbname);
 ?>
+
