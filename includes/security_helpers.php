@@ -25,9 +25,29 @@ if (!function_exists('bapenda_is_https')) {
     }
 }
 
+if (!function_exists('bapenda_send_security_headers')) {
+    function bapenda_send_security_headers()
+    {
+        static $sent = false;
+        if ($sent || PHP_SAPI === 'cli' || headers_sent()) {
+            return;
+        }
+        $sent = true;
+
+        header('X-Frame-Options: SAMEORIGIN');
+        header('X-Content-Type-Options: nosniff');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+        header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    }
+}
+
+bapenda_send_security_headers();
+
 if (!function_exists('bapenda_start_secure_session')) {
     function bapenda_start_secure_session()
     {
+        bapenda_send_security_headers();
+
         if (session_status() !== PHP_SESSION_NONE) {
             return;
         }
